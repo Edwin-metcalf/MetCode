@@ -80,7 +80,7 @@ func buildChatRequest(history []message, model string) chatRequest {
 
 	listDirectoryFunction := toolFunction{
 		Name:        "list_directory",
-		Description: "this function list all things in the current directory",
+		Description: "list all files in the current directory. Use when asked about directory content or when you need the name of files to then read them or edit them.",
 		Parameters: parameters{
 			Type:       "object",
 			Required:   []string{},
@@ -92,7 +92,26 @@ func buildChatRequest(history []message, model string) chatRequest {
 		Type:     "function",
 		Function: listDirectoryFunction,
 	}
-	outgoing.Tools = []tool{listDirectory}
+
+	readFileFunction := toolFunction{
+		Name:        "read_file",
+		Description: "reads the context of a file and returns it as plain text. Use when the user asks about context of a file or wants you to refer to code/text from a file that is not in the conversation.",
+		Parameters: parameters{
+			Type:     "object",
+			Required: []string{"path"},
+			Properties: map[string]any{
+				"path": map[string]any{
+					"type":        "string",
+					"description": "relative path to the file, realative to the current working directory. Example 'main.go' or 'internal/utils/hepler.go'. Use list_directory first to get exact file names",
+				},
+			},
+		},
+	}
+	readFile := tool{
+		Type:     "function",
+		Function: readFileFunction,
+	}
+	outgoing.Tools = []tool{listDirectory, readFile}
 
 	return outgoing
 }
