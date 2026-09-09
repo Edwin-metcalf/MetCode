@@ -182,17 +182,27 @@ func handleToolCall(call toolCall) message {
 }
 
 func readDirectoryHelper(call *toolCall) message {
-	path := call.Function.Arguments["path"].(string)
+	path, ok := call.Function.Arguments["path"].(string)
+	if !ok {
+		return message{
+			Role:    "tool",
+			Content: "error: no path provided",
+		}
+	}
 	//what to do if null or not the right path need to add error handling
 	//
 	fileContentBytes, err := os.ReadFile(path)
 	if err != nil {
 		// dont need to log fatal but need to handle if we cant read from that path
 		//
+		content := fmt.Sprintf("error reading file in path: %v", err)
+		return message{
+			Role:    "tool",
+			Content: content,
+		}
 	}
 
-	var fileContents string
-	fileContents = string(fileContentBytes)
+	fileContents := string(fileContentBytes)
 
 	outGoingMessage := message{
 		Role:    "tool",

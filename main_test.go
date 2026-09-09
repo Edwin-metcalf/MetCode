@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -16,9 +16,22 @@ func TestReadDirectoryHelper_ValidFile(t *testing.T) {
 	result := readDirectoryHelper(call)
 
 	if result.Role != "tool" {
-		fmt.Printf("Role is not tool it is &v", result.Role)
+		t.Errorf("Role is not tool it is %v", result.Role)
 	}
 	if result.Content == "" {
-		fmt.Println("Content is empty ")
+		t.Error("Content is empty ")
+	}
+}
+
+func TestReadDirectoryHelper_NoPath(t *testing.T) {
+	call := &toolCall{
+		Function: calledFunction{
+			Name:      "read_file",
+			Arguments: map[string]any{},
+		},
+	}
+	result := readDirectoryHelper(call)
+	if !strings.Contains(result.Content, "error") {
+		t.Errorf("expected error but got %q", result.Content)
 	}
 }
