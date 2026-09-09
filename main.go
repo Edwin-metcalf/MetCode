@@ -236,7 +236,10 @@ func toolCallHelper(toolCalls []toolCall, history *[]message, model string) {
 		*history = append(*history, toolMessage)
 	}
 	postToolChatRequest := buildChatRequest(*history, model)
+	done := make(chan bool)
+	go startSpinner(done)
 	toolResponse := postRequest(postToolChatRequest)
+	done <- true
 
 	*history = append(*history, toolResponse.Message)
 	fmt.Printf("DEBUG: %+v", toolResponse.Message)
