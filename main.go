@@ -194,13 +194,68 @@ func handleToolCall(call toolCall) message {
 		}
 		return ldMessage
 	case "read_file":
-		return readDirectoryHelper(&call)
+		return readFileHelper(&call)
 	default:
 		return message{}
 	}
 }
 
-func readDirectoryHelper(call *toolCall) message {
+func createFileHelper(call *toolCall) message {
+	fileName, ok := call.Function.Arguments["file_name"].(string)
+	if !ok {
+		return message{
+			Role:    "tool",
+			Content: "error: invalid file name: ",
+		}
+	}
+	newFile, err := os.Create(fileName)
+	if err != nil {
+		content := fmt.Sprintf("error creating file: %v", err)
+		return message{
+			Role:    "tool",
+			Content: content,
+		}
+	}
+	defer newFile.Close()
+
+	outGoingContent := fmt.Sprintf("%v file created", newFile.Name())
+	outGoingMessage := message{
+		Role:    "tool",
+		Content: outGoingContent,
+	}
+	return outGoingMessage
+}
+
+func editFileHelper(call *toolCall) message {
+	path, ok := call.Function.Arguments["path"].(string)
+	if !ok {
+		return message{
+			Role:    "tool",
+			Content: "error: no path provided",
+		}
+	}
+	fileContentBytes, err := os.ReadFile(path)
+	if err != nil {
+		return message{Role: "tool", Content: fmt.Sprintf("error: finding file: %v", err)}
+	}
+	fileContent := string(fileContentBytes)
+	count := strings.Count(fileContent, oldText)
+	if count == 0 {
+		return message{Role: "tool", Content: "error old text not found in file"}
+	}
+	if count > 1 {
+		return message{Role: "tool", Content: "error: old text matches multiple locations be specific"}
+	}
+
+	newContent := strings.Replace(fileContent, oldText, newText, 1)
+	err := os.WriteFile(path, []byte(newContent), 0o644)
+	if err != nil {
+		return message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
+	}
+	return message{Role: "tool", Content: fmt.Sprintf("%v file editted succesfully", path)}
+}
+
+func readFileHelper(call *toolCall) message {
 	path, ok := call.Function.Arguments["path"].(string)
 	if !ok {
 		return message{
