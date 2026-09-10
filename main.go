@@ -230,7 +230,12 @@ func readDirectoryHelper(call *toolCall) message {
 	return outGoingMessage
 }
 
-func toolCallHelper(toolCalls []toolCall, history *[]message, model string) {
+func toolCallHelper(toolCalls []toolCall, history *[]message, model string, depth int) {
+	if depth > 5 {
+		fmt.Println("depth of tool call hit 5 breaking out")
+		return
+	}
+	fmt.Printf("depth: %v\n", depth)
 	for _, call := range toolCalls {
 		toolMessage := handleToolCall(call)
 		*history = append(*history, toolMessage)
@@ -242,8 +247,14 @@ func toolCallHelper(toolCalls []toolCall, history *[]message, model string) {
 	done <- true
 
 	*history = append(*history, toolResponse.Message)
-	fmt.Printf("DEBUG: %+v", toolResponse.Message)
-	fmt.Println(toolResponse.Message.Content)
+
+	if len(toolResponse.Message.ToolCalls) > 0 {
+		toolCallHelper(toolResponse.Message.ToolCalls, history, model, depth+1)
+	} else {
+		fmt.Printf("DEBUG: %+v", toolResponse.Message)
+		fmt.Println(toolResponse.Message.Content)
+
+	}
 }
 
 func main() {
@@ -323,7 +334,7 @@ func main() {
 
 		if len(response.Message.ToolCalls) > 0 {
 			// call a tool call which then will re prompt the AI
-			toolCallHelper(response.Message.ToolCalls, &history, modelChosen)
+			toolCallHelper(response.Message.ToolCalls, &history, modelChosen, 0)
 		} else {
 			fmt.Println(response.Message.Content)
 		}
