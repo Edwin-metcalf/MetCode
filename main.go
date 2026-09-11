@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -69,6 +70,93 @@ type options struct {
 	Temperature float64 `json:"temperature"`
 }
 
+var allTools = []tool{
+	// this is global(package level) dont edit could be risky just copy if needed
+	{
+		Type: "function",
+		Function: toolFunction{
+			Name:        "list_directory",
+			Description: "list all files in the current directory. Use when asked about directory content or when you need the name of files to then read them or edit them.",
+			Parameters: parameters{
+				Type:       "object",
+				Required:   []string{},
+				Properties: map[string]any{},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: toolFunction{
+			Name:        "read_file",
+			Description: "reads the context of a file and returns it as plain text. Use when the user asks about context of a file or wants you to refer to code/text from a file that is not in the conversation.",
+			Parameters: parameters{
+				Type:     "object",
+				Required: []string{"path"},
+				Properties: map[string]any{
+					"path": map[string]any{
+						"type":        "string",
+						"description": "relative path to the file, relative to the current working directory. Example 'main.go' or 'internal/utils/helper.go'. Use list_directory first to get exact file names",
+					},
+				},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: toolFunction{
+			Name:        "create_file",
+			Description: "creates a new empty file. Use edit_file after to add content",
+			Parameters: parameters{
+				Type:     "object",
+				Required: []string{"path"},
+				Properties: map[string]any{
+					"path": map[string]any{
+						"type":        "string",
+						"description": "relative path and name of a file. Relative to the current working directory. Examples: 'example.go' or 'stuff/example.go'",
+					},
+				},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: toolFunction{
+			Name:        "edit_file",
+			Description: "edit a file. If the file is empty (e.g. just created with create_file), use an empty string for old_text. If the file is not empty old_text will have its contents read with read_file and you are editing those contents",
+			Parameters: parameters{
+				Type:     "object",
+				Required: []string{"path", "old_text", "new_text"},
+				Properties: map[string]any{
+					"path": map[string]any{
+						"type":        "string",
+						"description": "relative path to the file you want to edit. Relative to the current working directory. Example: 'example.go' or 'stuff/things/example.go'",
+					},
+					"old_text": map[string]any{
+						"type":        "string",
+						"description": "the text that was in the file. old_text must match the file's content exactly, including whitespace and indentation or the edit will fail.",
+					},
+					"new_text": map[string]any{
+						"type":        "string",
+						"description": "the new text that is going into the file after the edit",
+					},
+				},
+			},
+		},
+	},
+}
+
+var protectedFiles = map[string]bool{
+	// add files you want to make sure you protect even if the ai wants to edit them
+	"main.go":          true,
+	"main_test.go":     true,
+	"go.mod":           true,
+	"system_prompt.md": true,
+}
+
+func isProtected(path string) bool {
+	return protectedFiles[filepath.Base(path)]
+}
+
 func buildChatRequest(history []message, model string) chatRequest {
 	var outgoing chatRequest
 
@@ -76,42 +164,7 @@ func buildChatRequest(history []message, model string) chatRequest {
 	outgoing.Model = model
 	outgoing.Stream = false
 	outgoing.Options.Temperature = 0.1
-	// empty list directory function
-
-	listDirectoryFunction := toolFunction{
-		Name:        "list_directory",
-		Description: "list all files in the current directory. Use when asked about directory content or when you need the name of files to then read them or edit them.",
-		Parameters: parameters{
-			Type:       "object",
-			Required:   []string{},
-			Properties: map[string]any{},
-		},
-	}
-
-	listDirectory := tool{
-		Type:     "function",
-		Function: listDirectoryFunction,
-	}
-
-	readFileFunction := toolFunction{
-		Name:        "read_file",
-		Description: "reads the context of a file and returns it as plain text. Use when the user asks about context of a file or wants you to refer to code/text from a file that is not in the conversation.",
-		Parameters: parameters{
-			Type:     "object",
-			Required: []string{"path"},
-			Properties: map[string]any{
-				"path": map[string]any{
-					"type":        "string",
-					"description": "relative path to the file, realative to the current working directory. Example 'main.go' or 'internal/utils/hepler.go'. Use list_directory first to get exact file names",
-				},
-			},
-		},
-	}
-	readFile := tool{
-		Type:     "function",
-		Function: readFileFunction,
-	}
-	outgoing.Tools = []tool{listDirectory, readFile}
+	outgoing.Tools = allTools
 
 	return outgoing
 }
@@ -195,13 +248,18 @@ func handleToolCall(call toolCall) message {
 		return ldMessage
 	case "read_file":
 		return readFileHelper(&call)
+	case "create_file":
+		return createFileHelper(&call)
+	case "edit_file":
+		return editFileHelper(&call)
 	default:
 		return message{}
 	}
 }
 
 func createFileHelper(call *toolCall) message {
-	fileName, ok := call.Function.Arguments["file_name"].(string)
+	fileName, ok := call.Function.Arguments["path"].(string)
+	// will need to handle further down file paths
 	if !ok {
 		return message{
 			Role:    "tool",
@@ -229,17 +287,29 @@ func createFileHelper(call *toolCall) message {
 func editFileHelper(call *toolCall) message {
 	path, ok := call.Function.Arguments["path"].(string)
 	if !ok {
-		return message{
-			Role:    "tool",
-			Content: "error: no path provided",
-		}
+		return message{Role: "tool", Content: "error: no path provided"}
 	}
+	if isProtected(path) {
+		return message{Role: "tool", Content: "error: file is protected"}
+	}
+
+	oldText, ok := call.Function.Arguments["old_text"].(string)
+	if !ok {
+		return message{Role: "tool", Content: "error no old text found"}
+	}
+
+	newText, ok := call.Function.Arguments["new_text"].(string)
+	if !ok {
+		return message{Role: "tool", Content: "error no new text found"}
+	}
+
 	fileContentBytes, err := os.ReadFile(path)
 	if err != nil {
 		return message{Role: "tool", Content: fmt.Sprintf("error: finding file: %v", err)}
 	}
 	fileContent := string(fileContentBytes)
 	count := strings.Count(fileContent, oldText)
+
 	if count == 0 {
 		return message{Role: "tool", Content: "error old text not found in file"}
 	}
@@ -248,7 +318,7 @@ func editFileHelper(call *toolCall) message {
 	}
 
 	newContent := strings.Replace(fileContent, oldText, newText, 1)
-	err := os.WriteFile(path, []byte(newContent), 0o644)
+	err = os.WriteFile(path, []byte(newContent), 0o644)
 	if err != nil {
 		return message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
 	}
@@ -286,7 +356,7 @@ func readFileHelper(call *toolCall) message {
 }
 
 func toolCallHelper(toolCalls []toolCall, history *[]message, model string, depth int) {
-	if depth > 5 {
+	if depth > 8 {
 		fmt.Println("depth of tool call hit 5 breaking out")
 		return
 	}
