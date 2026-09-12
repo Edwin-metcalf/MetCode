@@ -1,11 +1,11 @@
 <div align="center">
-  ```
+<pre>
  __  __      _   ____          _      
 |  \/  | ___| |_/ ___|___   __| | ___ 
 | |\/| |/ _ \ __| |  / _ \ / _` |/ _ \
-| |  | |  __/ |_| |__| (_) | (_| |  __/
+ | |  | |  __/ |_| |__| (_) | (_| |  __/
 |_|  |_|\___|\__\____\___/ \__,_|\___|
-  ```
+</pre>
 </div>
 
 Ran out of Claude Code tokens? Tokens too expensive? Don't want to send all your data to some big company? I wanted to better understand how agentic coding assistants work?
