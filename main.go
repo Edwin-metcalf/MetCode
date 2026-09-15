@@ -23,6 +23,10 @@ const banner = `
 |_|  |_|\___|\__\____\___/ \__,_|\___|
 	`
 
+type App struct {
+	CurrentModel string
+	Scanner      *bufio.Scanner
+}
 type message struct {
 	Role      string     `json:"role"`
 	Content   string     `json:"content"`
@@ -259,13 +263,19 @@ func handleToolCall(call toolCall) message {
 
 func createFileHelper(call *toolCall) message {
 	fileName, ok := call.Function.Arguments["path"].(string)
-	// will need to handle further down file paths
 	if !ok {
 		return message{
 			Role:    "tool",
 			Content: "error: invalid file name: ",
 		}
 	}
+
+	// deal with creating the directories if the path is not just example.go but place/example.go
+	dir := filepath.Dir(fileName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return message{Role: "tool", Content: fmt.Sprintf("error creating directory %v", err)}
+	}
+
 	newFile, err := os.Create(fileName)
 	if err != nil {
 		content := fmt.Sprintf("error creating file: %v", err)
@@ -382,14 +392,7 @@ func toolCallHelper(toolCalls []toolCall, history *[]message, model string, dept
 	}
 }
 
-func main() {
-	// this can be its own function later
-	scanner := bufio.NewScanner(os.Stdin)
-	// get a scanner that runs on the while loop which should give us a running way to engage with the models
-	// would be cool to check ollama and print out the available models
-
-	fmt.Println(banner)
-	fmt.Println("Welcome to MetCode")
+func (a *App) chooseModels() string {
 	models := getModels()
 	fmt.Println("Available models to choose from")
 
@@ -397,23 +400,49 @@ func main() {
 		modelNum := strconv.Itoa(idx + 1)
 		fmt.Println(modelNum + ": " + val)
 	}
-	if !scanner.Scan() {
-		return
+	if !a.Scanner.Scan() {
+		return a.CurrentModel
 	}
-	modelChosen := strings.TrimSpace(scanner.Text())
+	modelChosen := strings.TrimSpace(a.Scanner.Text())
 
 	if !slices.Contains(models, modelChosen) {
 		modelNum, err := strconv.Atoi(modelChosen)
 		if err != nil {
 			// what error should I throw here?
-			log.Fatalf("%v is not a valid model or number", err)
+			fmt.Printf("Invalif input '%s' keeping current model", modelChosen)
+			return a.CurrentModel
 		}
 
 		if 1 <= modelNum && modelNum <= len(models) {
 			modelChosen = models[modelNum-1]
+		} else {
+			fmt.Println("No model associated with that number keeping old")
+			return a.CurrentModel
 		}
-
 	}
+	return modelChosen
+}
+
+func (a *App) handleCLICommand(command string) {
+	switch command {
+	case "/change-model":
+		a.CurrentModel = a.chooseModels()
+	}
+}
+
+func main() {
+	scanner := bufio.NewScanner(os.Stdin)
+
+	metCodeApp := &App{
+		CurrentModel: "",
+		Scanner:      scanner,
+	}
+	// get a scanner that runs on the while loop which should give us a running way to engage with the models
+
+	fmt.Println(banner)
+	fmt.Println("Welcome to MetCode")
+	metCodeApp.CurrentModel = metCodeApp.chooseModels()
+
 	var history []message
 	var sysContent string
 	sysContentRaw, err := os.ReadFile("system_prompt.md")
@@ -430,14 +459,18 @@ func main() {
 	history = append(history, systemMessage)
 	for {
 		fmt.Println("enter your prompt: ")
-		if !scanner.Scan() {
+		if !metCodeApp.Scanner.Scan() {
 			break
 		}
-		input := strings.TrimSpace(scanner.Text())
+		input := strings.TrimSpace(metCodeApp.Scanner.Text())
 
 		if input == "exit" || input == "quit" {
 			fmt.Println("shutting down")
 			break
+		}
+		if input[0] == '\\' {
+			metCodeApp.handleCLICommand(input)
+			continue
 		}
 
 		if input == "" {
@@ -449,7 +482,7 @@ func main() {
 		newMessage.Role = "user"
 		history = append(history, newMessage)
 
-		outgoingChatRequest := buildChatRequest(history, modelChosen)
+		outgoingChatRequest := buildChatRequest(history, metCodeApp.CurrentModel)
 
 		done := make(chan bool)
 		go startSpinner(done)
@@ -459,7 +492,7 @@ func main() {
 
 		if len(response.Message.ToolCalls) > 0 {
 			// call a tool call which then will re prompt the AI
-			toolCallHelper(response.Message.ToolCalls, &history, modelChosen, 0)
+			toolCallHelper(response.Message.ToolCalls, &history, metCodeApp.CurrentModel, 0)
 		} else {
 			fmt.Println(response.Message.Content)
 		}
