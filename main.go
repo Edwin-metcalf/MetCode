@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 const banner = `
@@ -26,6 +28,7 @@ const banner = `
 type App struct {
 	CurrentModel string
 	Scanner      *bufio.Scanner
+	OllamaHost   string
 }
 type message struct {
 	Role      string     `json:"role"`
@@ -173,7 +176,7 @@ func buildChatRequest(history []message, model string) chatRequest {
 	return outgoing
 }
 
-func postRequest(outGoingMessage chatRequest) chatResponse {
+func postRequest(outGoingMessage chatRequest, ollamaHost string) chatResponse {
 	// this is probably not needed but whatever
 	b, err := json.Marshal(outGoingMessage)
 	if err != nil {
@@ -181,7 +184,7 @@ func postRequest(outGoingMessage chatRequest) chatResponse {
 	}
 
 	body := bytes.NewBuffer(b)
-	url := "http://localhost:11434/api/chat"
+	url := ollamaHost + "/api/chat"
 
 	resp, err := http.Post(url, "application/json", body)
 	if err != nil {
@@ -211,8 +214,8 @@ func startSpinner(done chan bool) {
 	}
 }
 
-func getModels() []string {
-	resp, err := http.Get("http://localhost:11434/api/tags")
+func getModels(ollamaHost string) []string {
+	resp, err := http.Get(ollamaHost + "/api/tags")
 	if err != nil {
 		log.Fatalf("call to get ollama ls failed: %v", err)
 	}
@@ -328,6 +331,20 @@ func editFileHelper(call *toolCall) message {
 	}
 
 	newContent := strings.Replace(fileContent, oldText, newText, 1)
+
+	fmt.Println("----- proposed change to ", path, "------")
+	fmt.Println("- " + oldText)
+	fmt.Println("+ " + newText)
+	fmt.Println("------------------------------")
+	fmt.Println("apply this edit? (y/n)")
+
+	var response string
+	fmt.Scanln(&response)
+
+	if strings.ToLower(strings.TrimSpace(response)) != "y" {
+		return message{Role: "tool", Content: "Edit canceled by user"}
+	}
+
 	err = os.WriteFile(path, []byte(newContent), 0o644)
 	if err != nil {
 		return message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
@@ -365,35 +382,36 @@ func readFileHelper(call *toolCall) message {
 	return outGoingMessage
 }
 
-func toolCallHelper(toolCalls []toolCall, history *[]message, model string, depth int) {
+func toolCallHelper(toolCalls []toolCall, history *[]message, depth int, app App) {
 	if depth > 8 {
 		fmt.Println("depth of tool call hit 5 breaking out")
 		return
 	}
-	fmt.Printf("depth: %v\n", depth)
+	//fmt.Printf("depth: %v\n", depth)
+	//
 	for _, call := range toolCalls {
 		toolMessage := handleToolCall(call)
 		*history = append(*history, toolMessage)
 	}
-	postToolChatRequest := buildChatRequest(*history, model)
+
+	postToolChatRequest := buildChatRequest(*history, app.CurrentModel)
 	done := make(chan bool)
 	go startSpinner(done)
-	toolResponse := postRequest(postToolChatRequest)
+	toolResponse := postRequest(postToolChatRequest, app.OllamaHost)
 	done <- true
 
 	*history = append(*history, toolResponse.Message)
 
 	if len(toolResponse.Message.ToolCalls) > 0 {
-		toolCallHelper(toolResponse.Message.ToolCalls, history, model, depth+1)
+		toolCallHelper(toolResponse.Message.ToolCalls, history, depth+1, app)
 	} else {
-		fmt.Printf("DEBUG: %+v", toolResponse.Message)
+		//fmt.Printf("DEBUG: %+v", toolResponse.Message)
 		fmt.Println(toolResponse.Message.Content)
-
 	}
 }
 
 func (a *App) chooseModels() string {
-	models := getModels()
+	models := getModels(a.OllamaHost)
 	fmt.Println("Available models to choose from")
 
 	for idx, val := range models {
@@ -431,11 +449,21 @@ func (a *App) handleCLICommand(command string) {
 }
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("no .env file found, using default local host")
+	}
+
+	ollamaHost := os.Getenv("OLLAMA_HOST")
+	if ollamaHost == "" {
+		ollamaHost = "http://localhost:11434"
+	}
+
 	scanner := bufio.NewScanner(os.Stdin)
 
 	metCodeApp := &App{
 		CurrentModel: "",
 		Scanner:      scanner,
+		OllamaHost:   ollamaHost,
 	}
 	// get a scanner that runs on the while loop which should give us a running way to engage with the models
 
@@ -468,15 +496,14 @@ func main() {
 			fmt.Println("shutting down")
 			break
 		}
-		if input[0] == '\\' {
-			metCodeApp.handleCLICommand(input)
-			continue
-		}
 
 		if input == "" {
 			continue
 		}
-
+		if input[0] == '\\' {
+			metCodeApp.handleCLICommand(input)
+			continue
+		}
 		var newMessage message
 		newMessage.Content = input
 		newMessage.Role = "user"
@@ -486,13 +513,13 @@ func main() {
 
 		done := make(chan bool)
 		go startSpinner(done)
-		response := postRequest(outgoingChatRequest)
+		response := postRequest(outgoingChatRequest, ollamaHost)
 		done <- true
 		history = append(history, response.Message)
 
 		if len(response.Message.ToolCalls) > 0 {
 			// call a tool call which then will re prompt the AI
-			toolCallHelper(response.Message.ToolCalls, &history, metCodeApp.CurrentModel, 0)
+			toolCallHelper(response.Message.ToolCalls, &history, 0, *metCodeApp)
 		} else {
 			fmt.Println(response.Message.Content)
 		}
