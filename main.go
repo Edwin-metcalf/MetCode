@@ -29,6 +29,7 @@ type App struct {
 	CurrentModel string
 	Scanner      *bufio.Scanner
 	OllamaHost   string
+	Conversation string
 }
 type message struct {
 	Role      string     `json:"role"`
@@ -157,6 +158,7 @@ var protectedFiles = map[string]bool{
 	"main.go":          true,
 	"main_test.go":     true,
 	"go.mod":           true,
+	"go.sum":           true,
 	"system_prompt.md": true,
 }
 
@@ -297,6 +299,17 @@ func createFileHelper(call *toolCall) message {
 	return outGoingMessage
 }
 
+func prefixLines(text string, prefix string) string {
+	if text == "" {
+		return prefix
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
+}
+
 func editFileHelper(call *toolCall) message {
 	path, ok := call.Function.Arguments["path"].(string)
 	if !ok {
@@ -333,8 +346,8 @@ func editFileHelper(call *toolCall) message {
 	newContent := strings.Replace(fileContent, oldText, newText, 1)
 
 	fmt.Println("----- proposed change to ", path, "------")
-	fmt.Println("- " + oldText)
-	fmt.Println("+ " + newText)
+	fmt.Println(prefixLines(oldText, "- "))
+	fmt.Println(prefixLines(newText, "+ "))
 	fmt.Println("------------------------------")
 	fmt.Println("apply this edit? (y/n)")
 
@@ -441,10 +454,134 @@ func (a *App) chooseModels() string {
 	return modelChosen
 }
 
+func (a *App) handleLoad() (*[]message, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(home, ".metcode", "conversations")
+	dirSlice, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("error reading directory: %w", err)
+	}
+
+	if len(dirSlice) == 0 {
+		fmt.Println("No conversations saved!")
+		return nil, nil
+	}
+
+	var stringSlice []string
+	for _, val := range dirSlice {
+		stringSlice = append(stringSlice, val.Name())
+	}
+
+	var outputString string
+	totalFileNum := strconv.Itoa(len(stringSlice))
+
+	for idx, val := range stringSlice {
+		outputString += strconv.Itoa(idx+1) + ": " + val
+		if idx > 10 {
+			outputString += "10 files showing, total number of files: " + totalFileNum
+			break
+		}
+	}
+	fmt.Println(outputString)
+
+	if !a.Scanner.Scan() {
+		return nil, fmt.Errorf("error scanning input")
+	}
+	selectedInput := strings.TrimSpace(a.Scanner.Text())
+	nums := [10]string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}
+	var filePath string
+
+	if slices.Contains(nums[:], selectedInput) {
+		idx, err := strconv.Atoi(selectedInput)
+		if err != nil {
+			return nil, err
+		}
+		filePath = filepath.Join(dir, stringSlice[idx-1])
+
+	} else if slices.Contains(stringSlice, selectedInput) {
+		filePath = filepath.Join(dir, selectedInput)
+	} else {
+		return nil, fmt.Errorf("bad input %q: use the number or file name shown", selectedInput)
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	var loaded []message
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		return nil, err
+	}
+
+	return &loaded, nil
+}
+
+func (a *App) handleSave(history *[]message) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	dir := filepath.Join(home, ".metcode", "conversations")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+
+	if a.Conversation == "" {
+
+		fmt.Println("What would you like the conversation to be named?")
+
+		if !a.Scanner.Scan() {
+			fmt.Println("error scanning")
+			return fmt.Errorf("error scanning")
+		}
+		conversationName := strings.TrimSpace(a.Scanner.Text())
+
+		if !strings.HasSuffix(conversationName, ".txt") {
+			conversationName += ".txt"
+		}
+
+		data, err := json.MarshalIndent(*history, "", "	")
+		if err != nil {
+			return err
+		}
+		err = os.WriteFile(filepath.Join(dir, conversationName), data, 0o644)
+		if err != nil {
+			fmt.Println("error saving file")
+			return err
+		}
+		a.Conversation = conversationName
+
+	} else {
+		data, err := json.MarshalIndent(*history, "", "	")
+		if err != nil {
+			return err
+		}
+
+		err = os.WriteFile(filepath.Join(dir, a.Conversation), data, 0o644)
+		if err != nil {
+			fmt.Println("error appending data")
+			return err
+		}
+	}
+
+	fmt.Println("saving converst")
+	return nil
+}
+
 func (a *App) handleCLICommand(command string) {
 	switch command {
 	case "/change-model":
 		a.CurrentModel = a.chooseModels()
+	// case "/save":
+	// a.handleSave(history)
+	case "/load":
+		a.handleLoad()
+	case "/help":
+		fmt.Println("Currently only commands are change-model and help\n type exit to quite the program")
 	}
 }
 
@@ -464,6 +601,7 @@ func main() {
 		CurrentModel: "",
 		Scanner:      scanner,
 		OllamaHost:   ollamaHost,
+		Conversation: "",
 	}
 	// get a scanner that runs on the while loop which should give us a running way to engage with the models
 
