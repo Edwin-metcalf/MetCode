@@ -31,6 +31,7 @@ type App struct {
 	Scanner      *bufio.Scanner
 	OllamaHost   string
 	Conversation string
+	SystemPrompt message
 }
 type message struct {
 	Role      string     `json:"role"`
@@ -337,13 +338,13 @@ func runCommandHelper(call *toolCall) message {
 	if err != nil {
 		return message{
 			Role:    "tool",
-			Content: fmt.Sprintf("Command Failed: %v \nOutput: %s", err, output),
+			Content: fmt.Sprintf("error: Command Failed: %v \nOutput: %s", err, output),
 		}
 	}
 
 	return message{
 		Role:    "tool",
-		Content: fmt.Sprintf("Command ran succesfully, output: %v ", string(output)),
+		Content: fmt.Sprintf("error: Command ran succesfully, output: %v ", string(output)),
 	}
 }
 
@@ -476,9 +477,14 @@ func readFileHelper(call *toolCall) message {
 	return outGoingMessage
 }
 
-func toolCallHelper(toolCalls []toolCall, history *[]message, depth int, app App) {
+func toolCallHelper(toolCalls []toolCall, history *[]message, depth int, failCount int, app App) {
 	if depth > 8 {
-		fmt.Println("depth of tool call hit 5 breaking out")
+		fmt.Println("depth of tool call hit 8 breaking out")
+		return
+	}
+
+	if failCount > 3 {
+		fmt.Println("failed over and over again breaking out")
 		return
 	}
 	//fmt.Printf("depth: %v\n", depth)
@@ -497,7 +503,13 @@ func toolCallHelper(toolCalls []toolCall, history *[]message, depth int, app App
 	*history = append(*history, toolResponse.Message)
 
 	if len(toolResponse.Message.ToolCalls) > 0 {
-		toolCallHelper(toolResponse.Message.ToolCalls, history, depth+1, app)
+
+		if strings.HasPrefix(toolResponse.Message.Content, "error") {
+			failCount += 1
+		} else {
+			failCount = 0
+		}
+		toolCallHelper(toolResponse.Message.ToolCalls, history, depth+1, failCount, app)
 	} else {
 		//fmt.Printf("DEBUG: %+v", toolResponse.Message)
 		fmt.Println(toolResponse.Message.Content)
@@ -649,7 +661,7 @@ func (a *App) handleSave(history *[]message) error {
 		}
 	}
 
-	fmt.Println("saving converst")
+	fmt.Println("saving conversation")
 	return nil
 }
 
@@ -670,6 +682,8 @@ func (a *App) handleCLICommand(command string, history *[]message) {
 		if loaded != nil {
 			*history = *loaded
 		}
+	case "/clear":
+		*history = []message{a.SystemPrompt}
 
 	case "/help":
 		fmt.Println(`Available Commands
@@ -721,6 +735,7 @@ func main() {
 		Content: sysContent,
 	}
 	history = append(history, systemMessage)
+	metCodeApp.SystemPrompt = systemMessage
 	for {
 		fmt.Println("enter your prompt: ")
 		if !metCodeApp.Scanner.Scan() {
