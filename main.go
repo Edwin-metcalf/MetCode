@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -151,6 +152,32 @@ var allTools = []tool{
 			},
 		},
 	},
+	{
+		Type: "function",
+		Function: toolFunction{
+			Name:        "run_command",
+			Description: "Run a command in the terminal. Ability to run in local directory on an empty path or with a declared path.",
+			Parameters: parameters{
+				Type:     "object",
+				Required: []string{"command"},
+				Properties: map[string]any{
+					"command": map[string]any{
+						"type":        "string",
+						"description": "The executable/command name only, no arguments or subcommands attached — e.g. 'go', 'ls', 'grep'. Put subcommands and flags in 'arguments' instead (e.g. command: 'go', arguments: [\"run\", \"main.go\"])",
+					},
+					"path": map[string]any{
+						"type":        "string",
+						"description": "the path relative to the current directory. This is optional if it is empty it will automatically run in the current directory. Example: '/stuff/things/'",
+					},
+					"arguments": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "list of arguments to pass to the command, each as a separate element. Example: [\"-la\", \"/tmp\"]",
+					},
+				},
+			},
+		},
+	},
 }
 
 var protectedFiles = map[string]bool{
@@ -261,8 +288,62 @@ func handleToolCall(call toolCall) message {
 		return createFileHelper(&call)
 	case "edit_file":
 		return editFileHelper(&call)
+	case "run_command":
+		return runCommandHelper(&call)
 	default:
 		return message{}
+	}
+}
+
+func runCommandHelper(call *toolCall) message {
+	command, ok := call.Function.Arguments["command"].(string)
+	if !ok || command == "" {
+		return message{
+			Role:    "tool",
+			Content: "error: invalid command",
+		}
+	}
+
+	dir := "."
+	if rawPath, ok := call.Function.Arguments["path"].(string); ok && rawPath != "" {
+		dir = rawPath
+	}
+
+	var arguments []string
+	if rawArgs, ok := call.Function.Arguments["arguments"].([]any); ok {
+		for _, a := range rawArgs {
+			if s, ok := a.(string); ok {
+				arguments = append(arguments, s)
+			}
+		}
+	}
+
+	fmt.Println("----- MetCode wants to run a command ------")
+	fmt.Println("directory: ", dir)
+	fmt.Println("Command: ", command, strings.Join(arguments, " "))
+	fmt.Println("------------------------------")
+	fmt.Println("Run this command? (y/n)")
+
+	var response string
+	fmt.Scanln(&response)
+
+	if strings.ToLower(strings.TrimSpace(response)) != "y" {
+		return message{Role: "tool", Content: "command canceled by user"}
+	}
+	cmd := exec.Command(command, arguments...)
+	cmd.Dir = dir
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return message{
+			Role:    "tool",
+			Content: fmt.Sprintf("Command Failed: %v \nOutput: %s", err, output),
+		}
+	}
+
+	return message{
+		Role:    "tool",
+		Content: fmt.Sprintf("Command ran succesfully, output: %v ", string(output)),
 	}
 }
 
@@ -572,16 +653,33 @@ func (a *App) handleSave(history *[]message) error {
 	return nil
 }
 
-func (a *App) handleCLICommand(command string) {
+func (a *App) handleCLICommand(command string, history *[]message) {
 	switch command {
 	case "/change-model":
 		a.CurrentModel = a.chooseModels()
-	// case "/save":
-	// a.handleSave(history)
+	case "/save":
+		if err := a.handleSave(history); err != nil {
+			fmt.Println("error saving:", err)
+		}
 	case "/load":
-		a.handleLoad()
+		loaded, err := a.handleLoad()
+		if err != nil {
+			fmt.Println("error loading:", err)
+			return
+		}
+		if loaded != nil {
+			*history = *loaded
+		}
+
 	case "/help":
-		fmt.Println("Currently only commands are change-model and help\n type exit to quite the program")
+		fmt.Println(`Available Commands
+	- /help - Displays help menu
+	- /change-model - Changes the model your using
+	- /save - Save the current conversation to a new conversation or an old one
+	- /load - Load a past conversation
+			`)
+	default:
+		fmt.Println("That is not a command I currently have try /help")
 	}
 }
 
@@ -638,8 +736,8 @@ func main() {
 		if input == "" {
 			continue
 		}
-		if input[0] == '\\' {
-			metCodeApp.handleCLICommand(input)
+		if input[0] == '/' {
+			metCodeApp.handleCLICommand(input, &history)
 			continue
 		}
 		var newMessage message
