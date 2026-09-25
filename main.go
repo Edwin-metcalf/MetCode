@@ -33,6 +33,7 @@ type App struct {
 	Conversation string
 	SystemPrompt message
 	ProjectRoot  string
+	CurrentPlan  []planItem
 }
 type message struct {
 	Role      string     `json:"role"`
@@ -79,6 +80,12 @@ type tool struct {
 }
 type options struct {
 	Temperature float64 `json:"temperature"`
+}
+
+type planItem struct {
+	Id          float64 `json:"id"`
+	Description string  `json:"description"`
+	Status      string  `json:"status"` // pending in_progress done
 }
 
 var allTools = []tool{
@@ -294,6 +301,73 @@ func handleToolCall(call toolCall, root string) message {
 		return runCommandHelper(&call)
 	default:
 		return message{}
+	}
+}
+
+func createPlanHelper(call *toolCall, app *App) message {
+	var descriptions []string
+	if rawDesc, ok := call.Function.Arguments["descriptions"].([]any); ok {
+		for _, a := range rawDesc {
+			if str, ok := a.(string); ok {
+				descriptions = append(descriptions, str)
+			}
+		}
+	}
+
+	var planItemList []planItem
+	curId := 1.0
+	for _, description := range descriptions {
+		newItem := planItem{
+			Id:          curId,
+			Description: description,
+			Status:      "pending",
+		}
+		planItemList = append(planItemList, newItem)
+
+		curId += 1
+	}
+
+	app.CurrentPlan = planItemList
+
+	return message{
+		Role:    "tool",
+		Content: "New plan created succesfully",
+	}
+}
+
+func updatePlanItemHelper(call *toolCall, itemList *[]planItem) message {
+	// seemss a little absurd to store them as float 64s but its whats returned from the json unmarshaling
+	id, ok := call.Function.Arguments["id"].(float64)
+	if !ok {
+		return message{
+			Role:    "tool",
+			Content: "error: invalid id",
+		}
+	}
+
+	status, ok := call.Function.Arguments["status"].(string)
+	if !ok {
+		return message{
+			Role:    "tool",
+			Content: "error: invalid status",
+		}
+	}
+
+	for i := range *itemList {
+		if (*itemList)[i].Id == id {
+			(*itemList)[i].Status = status
+
+			return message{
+				Role:    "tool",
+				Content: "succesfully updated plan item",
+			}
+
+		}
+	}
+
+	return message{
+		Role:    "tool",
+		Content: "no plan item found with that ID",
 	}
 }
 
@@ -828,6 +902,9 @@ func main() {
 		} else {
 			fmt.Println(response.Message.Content)
 		}
+
+		contextWindowlen := estimateTokens(history)
+		fmt.Printf("Estimated context window: %v \n", contextWindowlen)
 
 	}
 }
