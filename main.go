@@ -32,6 +32,7 @@ type App struct {
 	OllamaHost   string
 	Conversation string
 	SystemPrompt message
+	ProjectRoot  string
 }
 type message struct {
 	Role      string     `json:"role"`
@@ -262,7 +263,7 @@ func getModels(ollamaHost string) []string {
 	return stringOutput
 }
 
-func handleToolCall(call toolCall) message {
+func handleToolCall(call toolCall, root string) message {
 	toolName := call.Function.Name
 	switch toolName {
 	case "list_directory":
@@ -284,11 +285,11 @@ func handleToolCall(call toolCall) message {
 		}
 		return ldMessage
 	case "read_file":
-		return readFileHelper(&call)
+		return readFileHelper(&call, root)
 	case "create_file":
-		return createFileHelper(&call)
+		return createFileHelper(&call, root)
 	case "edit_file":
-		return editFileHelper(&call)
+		return editFileHelper(&call, root)
 	case "run_command":
 		return runCommandHelper(&call)
 	default:
@@ -348,13 +349,18 @@ func runCommandHelper(call *toolCall) message {
 	}
 }
 
-func createFileHelper(call *toolCall) message {
+func createFileHelper(call *toolCall, root string) message {
 	fileName, ok := call.Function.Arguments["path"].(string)
 	if !ok {
 		return message{
 			Role:    "tool",
 			Content: "error: invalid file name: ",
 		}
+	}
+
+	fileName, err := resolveSafePath(root, fileName)
+	if err != nil {
+		return message{Role: "tool", Content: "error: path is possibly dangerous"}
 	}
 
 	// deal with creating the directories if the path is not just example.go but place/example.go
@@ -392,13 +398,17 @@ func prefixLines(text string, prefix string) string {
 	return strings.Join(lines, "\n")
 }
 
-func editFileHelper(call *toolCall) message {
+func editFileHelper(call *toolCall, root string) message {
 	path, ok := call.Function.Arguments["path"].(string)
 	if !ok {
 		return message{Role: "tool", Content: "error: no path provided"}
 	}
 	if isProtected(path) {
 		return message{Role: "tool", Content: "error: file is protected"}
+	}
+	path, err := resolveSafePath(root, path)
+	if err != nil {
+		return message{Role: "tool", Content: "error: path is possibly dangerous"}
 	}
 
 	oldText, ok := call.Function.Arguments["old_text"].(string)
@@ -447,12 +457,19 @@ func editFileHelper(call *toolCall) message {
 	return message{Role: "tool", Content: fmt.Sprintf("%v file editted succesfully", path)}
 }
 
-func readFileHelper(call *toolCall) message {
+func readFileHelper(call *toolCall, root string) message {
 	path, ok := call.Function.Arguments["path"].(string)
 	if !ok {
 		return message{
 			Role:    "tool",
 			Content: "error: no path provided",
+		}
+	}
+	path, err := resolveSafePath(root, path)
+	if err != nil {
+		return message{
+			Role:    "tool",
+			Content: "error: path is possibly dangerous",
 		}
 	}
 	//what to do if null or not the right path need to add error handling
@@ -490,7 +507,7 @@ func toolCallHelper(toolCalls []toolCall, history *[]message, depth int, failCou
 	//fmt.Printf("depth: %v\n", depth)
 	//
 	for _, call := range toolCalls {
-		toolMessage := handleToolCall(call)
+		toolMessage := handleToolCall(call, app.ProjectRoot)
 		*history = append(*history, toolMessage)
 	}
 
@@ -697,6 +714,37 @@ func (a *App) handleCLICommand(command string, history *[]message) {
 	}
 }
 
+func resolveSafePath(root string, requestedPath string) (string, error) {
+	fullPath := filepath.Join(root, requestedPath)
+
+	cleanedPath := filepath.Clean(fullPath)
+	absPath, err := filepath.Abs(cleanedPath)
+	if err != nil {
+		return "", err
+	}
+
+	relativePath, err := filepath.Rel(root, absPath)
+	// we want it to error then it means there is no relative
+	if err != nil {
+		return "", err
+	}
+
+	if relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes root: %s", relativePath)
+	}
+
+	return absPath, nil
+}
+
+func estimateTokens(messages []message) int {
+	totalTokens := 0
+	for _, val := range messages {
+		text := val.Content
+		totalTokens += len(text) / 4
+	}
+	return totalTokens
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("no .env file found, using default local host")
@@ -709,11 +757,17 @@ func main() {
 
 	scanner := bufio.NewScanner(os.Stdin)
 
+	workingDir, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("failed to get working directory")
+	}
+
 	metCodeApp := &App{
 		CurrentModel: "",
 		Scanner:      scanner,
 		OllamaHost:   ollamaHost,
 		Conversation: "",
+		ProjectRoot:  workingDir,
 	}
 	// get a scanner that runs on the while loop which should give us a running way to engage with the models
 
@@ -770,7 +824,7 @@ func main() {
 
 		if len(response.Message.ToolCalls) > 0 {
 			// call a tool call which then will re prompt the AI
-			toolCallHelper(response.Message.ToolCalls, &history, 0, *metCodeApp)
+			toolCallHelper(response.Message.ToolCalls, &history, 0, 0, *metCodeApp)
 		} else {
 			fmt.Println(response.Message.Content)
 		}
