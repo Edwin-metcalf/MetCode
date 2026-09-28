@@ -81,11 +81,18 @@ type tool struct {
 type options struct {
 	Temperature float64 `json:"temperature"`
 }
+type planStatus string
+
+const (
+	statusPending    planStatus = "pending"
+	statusInProgress planStatus = "in_progress"
+	statusDone       planStatus = "done"
+)
 
 type planItem struct {
-	Id          float64 `json:"id"`
-	Description string  `json:"description"`
-	Status      string  `json:"status"` // pending in_progress done
+	Id          float64    `json:"id"`
+	Description string     `json:"description"`
+	Status      planStatus `json:"status"` // pending in_progress done
 }
 
 var allTools = []tool{
@@ -187,6 +194,46 @@ var allTools = []tool{
 			},
 		},
 	},
+	{
+		Type: "function",
+		Function: toolFunction{
+			Name:        "build_plan",
+			Description: "build a plan to keep you organized with task descriptions and their status which could be pending, in_progress, or done",
+			Parameters: parameters{
+				Type:     "object",
+				Required: []string{"descriptions"},
+				Properties: map[string]any{
+					"descriptions": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "list of descriptions that describe the individual step of the plan. ",
+					},
+				},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: toolFunction{
+			Name:        "update_plan",
+			Description: "update the status of a step in the plan",
+			Parameters: parameters{
+				Type:     "object",
+				Required: []string{"id", "status"},
+				Properties: map[string]any{
+					"id": map[string]any{
+						"type":        "integer",
+						"description": "the ID of the step in the plan that is supposed to be updated",
+					},
+					"status": map[string]any{
+						"type":        "string",
+						"enum":        []string{"pending", "in_progress", "done"},
+						"description": "The new status to update the step of the plan",
+					},
+				},
+			},
+		},
+	},
 }
 
 var protectedFiles = map[string]bool{
@@ -270,7 +317,7 @@ func getModels(ollamaHost string) []string {
 	return stringOutput
 }
 
-func handleToolCall(call toolCall, root string) message {
+func handleToolCall(call toolCall, app *App) message {
 	toolName := call.Function.Name
 	switch toolName {
 	case "list_directory":
@@ -292,13 +339,17 @@ func handleToolCall(call toolCall, root string) message {
 		}
 		return ldMessage
 	case "read_file":
-		return readFileHelper(&call, root)
+		return readFileHelper(&call, app.ProjectRoot)
 	case "create_file":
-		return createFileHelper(&call, root)
+		return createFileHelper(&call, app.ProjectRoot)
 	case "edit_file":
-		return editFileHelper(&call, root)
+		return editFileHelper(&call, app.ProjectRoot)
 	case "run_command":
 		return runCommandHelper(&call)
+	case "create_plan":
+		return createPlanHelper(&call, app)
+	case "update_plan":
+		return updatePlanItemHelper(&call, &app.CurrentPlan)
 	default:
 		return message{}
 	}
@@ -320,7 +371,7 @@ func createPlanHelper(call *toolCall, app *App) message {
 		newItem := planItem{
 			Id:          curId,
 			Description: description,
-			Status:      "pending",
+			Status:      planStatus("pending"),
 		}
 		planItemList = append(planItemList, newItem)
 
@@ -352,16 +403,23 @@ func updatePlanItemHelper(call *toolCall, itemList *[]planItem) message {
 			Content: "error: invalid status",
 		}
 	}
+	switch planStatus(status) {
+	case statusDone, statusInProgress, statusPending:
+		for i := range *itemList {
+			if (*itemList)[i].Id == id {
+				(*itemList)[i].Status = planStatus(status)
 
-	for i := range *itemList {
-		if (*itemList)[i].Id == id {
-			(*itemList)[i].Status = status
-
-			return message{
-				Role:    "tool",
-				Content: "succesfully updated plan item",
+				return message{
+					Role:    "tool",
+					Content: "succesfully updated plan item",
+				}
 			}
+		}
 
+	default:
+		return message{
+			Role:    "tool",
+			Content: "error invalid status",
 		}
 	}
 
@@ -568,7 +626,7 @@ func readFileHelper(call *toolCall, root string) message {
 	return outGoingMessage
 }
 
-func toolCallHelper(toolCalls []toolCall, history *[]message, depth int, failCount int, app App) {
+func toolCallHelper(toolCalls []toolCall, history *[]message, depth int, failCount int, app *App) {
 	if depth > 8 {
 		fmt.Println("depth of tool call hit 8 breaking out")
 		return
@@ -581,7 +639,7 @@ func toolCallHelper(toolCalls []toolCall, history *[]message, depth int, failCou
 	//fmt.Printf("depth: %v\n", depth)
 	//
 	for _, call := range toolCalls {
-		toolMessage := handleToolCall(call, app.ProjectRoot)
+		toolMessage := handleToolCall(call, app)
 		*history = append(*history, toolMessage)
 	}
 
@@ -898,7 +956,7 @@ func main() {
 
 		if len(response.Message.ToolCalls) > 0 {
 			// call a tool call which then will re prompt the AI
-			toolCallHelper(response.Message.ToolCalls, &history, 0, 0, *metCodeApp)
+			toolCallHelper(response.Message.ToolCalls, &history, 0, 0, metCodeApp)
 		} else {
 			fmt.Println(response.Message.Content)
 		}
