@@ -367,6 +367,7 @@ func createPlanHelper(call *toolCall, app *App) message {
 
 	var planItemList []planItem
 	curId := 1.0
+	returnString := "plan: "
 	for _, description := range descriptions {
 		newItem := planItem{
 			Id:          curId,
@@ -374,6 +375,8 @@ func createPlanHelper(call *toolCall, app *App) message {
 			Status:      planStatus("pending"),
 		}
 		planItemList = append(planItemList, newItem)
+		localAdd := fmt.Sprintf("Id: %v, Description: %v, Status pending \n", curId, description)
+		returnString = returnString + localAdd
 
 		curId += 1
 	}
@@ -382,7 +385,7 @@ func createPlanHelper(call *toolCall, app *App) message {
 
 	return message{
 		Role:    "tool",
-		Content: "New plan created succesfully",
+		Content: fmt.Sprintf("New plan created succesfully: %v", returnString),
 	}
 }
 
