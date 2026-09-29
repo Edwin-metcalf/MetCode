@@ -95,6 +95,9 @@ type planItem struct {
 	Status      planStatus `json:"status"` // pending in_progress done
 }
 
+// this is if there is no system prompt in the ~./metcode then load up the default there
+var defaultSystemPrompt string
+
 var allTools = []tool{
 	// this is global(package level) dont edit could be risky just copy if needed
 	{
@@ -886,6 +889,32 @@ func estimateTokens(messages []message) int {
 	return totalTokens
 }
 
+func loadOrCreateSystemPrompt(home string) (string, error) {
+	path := filepath.Join(home, ".metcode", "system_prompt.md")
+	content, err := os.ReadFile(path)
+
+	if err == nil {
+		return string(content), nil
+	}
+
+	if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	dir := filepath.Dir(path)
+	err = os.MkdirAll(dir, 0o755)
+	if err != nil {
+		return "", err
+	}
+
+	err = os.WriteFile(path, []byte(defaultSystemPrompt), 0o644)
+	if err != nil {
+		return "", err
+	}
+
+	return defaultSystemPrompt, nil
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("no .env file found, using default local host")
@@ -918,12 +947,18 @@ func main() {
 
 	var history []message
 	var sysContent string
-	sysContentRaw, err := os.ReadFile("system_prompt.md")
+
+	home, err := os.UserHomeDir()
 	if err != nil {
-		sysContent = "act normally use tools only if applicable and be helpful become an expert in whatever field is asked and make sure your work is accurate"
-	} else {
-		sysContent = string(sysContentRaw)
+		log.Fatalf("could not determine home directory: %v", err)
 	}
+
+	sysContentRaw, err := loadOrCreateSystemPrompt(home)
+	if err != nil {
+		log.Fatalf("failed to load system prompt: %v", err)
+	}
+
+	sysContent = string(sysContentRaw)
 
 	systemMessage := message{
 		Role:    "system",
