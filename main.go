@@ -364,6 +364,12 @@ func createPlanHelper(call *toolCall, app *App) message {
 			}
 		}
 	}
+	if len(descriptions) == 0 {
+		return message{
+			Role:    "tool",
+			Content: "error: at least one description is required",
+		}
+	}
 
 	var planItemList []planItem
 	curId := 1.0
