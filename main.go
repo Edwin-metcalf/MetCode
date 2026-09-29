@@ -96,6 +96,8 @@ type planItem struct {
 }
 
 // this is if there is no system prompt in the ~./metcode then load up the default there
+
+//go:embed system_prompt.md
 var defaultSystemPrompt string
 
 var allTools = []tool{
