@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -202,8 +203,8 @@ var allTools = []tool{
 	{
 		Type: "function",
 		Function: toolFunction{
-			Name:        "build_plan",
-			Description: "build a plan to keep you organized with task descriptions and their status which could be pending, in_progress, or done",
+			Name:        "create_plan",
+			Description: "create a plan to keep you organized with task descriptions and their status which could be pending, in_progress, or done",
 			Parameters: parameters{
 				Type:     "object",
 				Required: []string{"descriptions"},
@@ -243,7 +244,8 @@ var allTools = []tool{
 
 var protectedFiles = map[string]bool{
 	// add files you want to make sure you protect even if the ai wants to edit them
-	"main.go":          true,
+	//this is kinda ahh what if these files are in the directory that wants to be edited how to not edit the original
+	//"main.go":          true,
 	"main_test.go":     true,
 	"go.mod":           true,
 	"go.sum":           true,
@@ -266,11 +268,11 @@ func buildChatRequest(history []message, model string) chatRequest {
 	return outgoing
 }
 
-func postRequest(outGoingMessage chatRequest, ollamaHost string) chatResponse {
+func postRequest(outGoingMessage chatRequest, ollamaHost string) (chatResponse, error) {
 	// this is probably not needed but whatever
 	b, err := json.Marshal(outGoingMessage)
 	if err != nil {
-		log.Fatalf("failed to serialize to JSON")
+		return chatResponse{}, fmt.Errorf("serializing request error %v: ", err)
 	}
 
 	body := bytes.NewBuffer(b)
@@ -278,14 +280,14 @@ func postRequest(outGoingMessage chatRequest, ollamaHost string) chatResponse {
 
 	resp, err := http.Post(url, "application/json", body)
 	if err != nil {
-		log.Fatalf("failed to create resource")
+		return chatResponse{}, fmt.Errorf("error contacting ollama at %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 	var output chatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&output); err != nil {
-		log.Fatalf("failed to read response body %v", err)
+		return chatResponse{}, fmt.Errorf("error decoding response: %w", err)
 	}
-	return output
+	return output, nil
 }
 
 func startSpinner(done chan bool) {
@@ -326,7 +328,7 @@ func handleToolCall(call toolCall, app *App) message {
 	toolName := call.Function.Name
 	switch toolName {
 	case "list_directory":
-		dirSlice, err := os.ReadDir(".")
+		dirSlice, err := os.ReadDir(app.ProjectRoot)
 		var dirString string
 
 		if err != nil {
@@ -491,7 +493,7 @@ func runCommandHelper(call *toolCall) message {
 
 	return message{
 		Role:    "tool",
-		Content: fmt.Sprintf("error: Command ran succesfully, output: %v ", string(output)),
+		Content: fmt.Sprintf("Command ran succesfully, output: %v ", string(output)),
 	}
 }
 
@@ -660,8 +662,12 @@ func toolCallHelper(toolCalls []toolCall, history *[]message, depth int, failCou
 	postToolChatRequest := buildChatRequest(*history, app.CurrentModel)
 	done := make(chan bool)
 	go startSpinner(done)
-	toolResponse := postRequest(postToolChatRequest, app.OllamaHost)
+	toolResponse, err := postRequest(postToolChatRequest, app.OllamaHost)
 	done <- true
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
 
 	*history = append(*history, toolResponse.Message)
 
@@ -996,8 +1002,13 @@ func main() {
 
 		done := make(chan bool)
 		go startSpinner(done)
-		response := postRequest(outgoingChatRequest, ollamaHost)
+		response, err := postRequest(outgoingChatRequest, ollamaHost)
 		done <- true
+		if err != nil {
+			fmt.Println("error", err)
+			history = history[:len(history)-1]
+			continue
+		}
 		history = append(history, response.Message)
 
 		if len(response.Message.ToolCalls) > 0 {
