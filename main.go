@@ -15,6 +15,7 @@ import (
 
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
 	"github.com/Edwin-metcalf/MetCode/internal/plan"
+	"github.com/Edwin-metcalf/MetCode/internal/prompt"
 	"github.com/Edwin-metcalf/MetCode/internal/tools"
 	"github.com/joho/godotenv"
 )
@@ -36,11 +37,6 @@ type App struct {
 	ProjectRoot  string
 	CurrentPlan  []plan.Item
 }
-
-// this is if there is no system prompt in the ~./metcode then load up the default there
-
-//go:embed system_prompt.md
-var defaultSystemPrompt string
 
 func buildChatRequest(history []ollama.Message, model string) ollama.ChatRequest {
 	var outgoing ollama.ChatRequest
@@ -294,28 +290,6 @@ func (a *App) handleCLICommand(command string, history *[]ollama.Message) {
 	}
 }
 
-func resolveSafePath(root string, requestedPath string) (string, error) {
-	fullPath := filepath.Join(root, requestedPath)
-
-	cleanedPath := filepath.Clean(fullPath)
-	absPath, err := filepath.Abs(cleanedPath)
-	if err != nil {
-		return "", err
-	}
-
-	relativePath, err := filepath.Rel(root, absPath)
-	// we want it to error then it means there is no relative
-	if err != nil {
-		return "", err
-	}
-
-	if relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path escapes root: %s", relativePath)
-	}
-
-	return absPath, nil
-}
-
 func estimateTokens(messages []ollama.Message) int {
 	totalTokens := 0
 	for _, val := range messages {
@@ -323,32 +297,6 @@ func estimateTokens(messages []ollama.Message) int {
 		totalTokens += len(text) / 4
 	}
 	return totalTokens
-}
-
-func loadOrCreateSystemPrompt(home string) (string, error) {
-	path := filepath.Join(home, ".metcode", "system_prompt.md")
-	content, err := os.ReadFile(path)
-
-	if err == nil {
-		return string(content), nil
-	}
-
-	if !os.IsNotExist(err) {
-		return "", err
-	}
-
-	dir := filepath.Dir(path)
-	err = os.MkdirAll(dir, 0o755)
-	if err != nil {
-		return "", err
-	}
-
-	err = os.WriteFile(path, []byte(defaultSystemPrompt), 0o644)
-	if err != nil {
-		return "", err
-	}
-
-	return defaultSystemPrompt, nil
 }
 
 func main() {
@@ -382,19 +330,16 @@ func main() {
 	metCodeApp.CurrentModel = metCodeApp.chooseModels()
 
 	var history []ollama.Message
-	var sysContent string
 
 	home, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatalf("could not determine home directory: %v", err)
 	}
 
-	sysContentRaw, err := loadOrCreateSystemPrompt(home)
+	sysContent, err := prompt.LoadOrCreateSystemPrompt(home)
 	if err != nil {
 		log.Fatalf("failed to load system prompt: %v", err)
 	}
-
-	sysContent = string(sysContentRaw)
 
 	systemMessage := ollama.Message{
 		Role:    "system",
