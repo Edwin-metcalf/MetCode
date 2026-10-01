@@ -2,12 +2,10 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Edwin-metcalf/MetCode/internal/ollama"
 	"github.com/Edwin-metcalf/MetCode/internal/plan"
 	"github.com/joho/godotenv"
 )
@@ -33,55 +32,9 @@ type App struct {
 	Scanner      *bufio.Scanner
 	OllamaHost   string
 	Conversation string
-	SystemPrompt message
+	SystemPrompt ollama.Message
 	ProjectRoot  string
 	CurrentPlan  []plan.Item
-}
-type message struct {
-	Role      string     `json:"role"`
-	Content   string     `json:"content"`
-	ToolCalls []toolCall `json:"tool_calls"`
-}
-type toolCall struct {
-	Function calledFunction `json:"function"`
-}
-type chatRequest struct {
-	Messages []message `json:"messages"`
-	Model    string    `json:"model"`
-	Stream   bool      `json:"stream"`
-	Tools    []tool    `json:"tools"`
-	Options  options   `json:"options"`
-}
-type chatResponse struct {
-	Message message `json:"message"`
-}
-type models struct {
-	Name string `json:"name"`
-}
-type modelWrapper struct {
-	Models []models `json:"models"`
-}
-type parameters struct {
-	Type       string         `json:"type"`
-	Required   []string       `json:"required"`
-	Properties map[string]any `json:"properties"`
-}
-type toolFunction struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	Parameters  parameters `json:"parameters"`
-}
-type calledFunction struct {
-	Name      string         `json:"name"`
-	Arguments map[string]any `json:"arguments"`
-}
-
-type tool struct {
-	Type     string       `json:"type"`
-	Function toolFunction `json:"function"`
-}
-type options struct {
-	Temperature float64 `json:"temperature"`
 }
 
 // this is if there is no system prompt in the ~./metcode then load up the default there
@@ -89,14 +42,14 @@ type options struct {
 //go:embed system_prompt.md
 var defaultSystemPrompt string
 
-var allTools = []tool{
+var allTools = []ollama.Tool{
 	// this is global(package level) dont edit could be risky just copy if needed
 	{
 		Type: "function",
-		Function: toolFunction{
+		Function: ollama.ToolFunction{
 			Name:        "list_directory",
 			Description: "list all files in the current directory. Use when asked about directory content or when you need the name of files to then read them or edit them.",
-			Parameters: parameters{
+			Parameters: ollama.Parameters{
 				Type:       "object",
 				Required:   []string{},
 				Properties: map[string]any{},
@@ -105,10 +58,10 @@ var allTools = []tool{
 	},
 	{
 		Type: "function",
-		Function: toolFunction{
+		Function: ollama.ToolFunction{
 			Name:        "read_file",
 			Description: "reads the context of a file and returns it as plain text. Use when the user asks about context of a file or wants you to refer to code/text from a file that is not in the conversation.",
-			Parameters: parameters{
+			Parameters: ollama.Parameters{
 				Type:     "object",
 				Required: []string{"path"},
 				Properties: map[string]any{
@@ -122,10 +75,10 @@ var allTools = []tool{
 	},
 	{
 		Type: "function",
-		Function: toolFunction{
+		Function: ollama.ToolFunction{
 			Name:        "create_file",
 			Description: "creates a new empty file. Use edit_file after to add content",
-			Parameters: parameters{
+			Parameters: ollama.Parameters{
 				Type:     "object",
 				Required: []string{"path"},
 				Properties: map[string]any{
@@ -139,10 +92,10 @@ var allTools = []tool{
 	},
 	{
 		Type: "function",
-		Function: toolFunction{
+		Function: ollama.ToolFunction{
 			Name:        "edit_file",
 			Description: "edit a file. If the file is empty (e.g. just created with create_file), use an empty string for old_text. If the file is not empty old_text will have its contents read with read_file and you are editing those contents",
-			Parameters: parameters{
+			Parameters: ollama.Parameters{
 				Type:     "object",
 				Required: []string{"path", "old_text", "new_text"},
 				Properties: map[string]any{
@@ -164,10 +117,10 @@ var allTools = []tool{
 	},
 	{
 		Type: "function",
-		Function: toolFunction{
+		Function: ollama.ToolFunction{
 			Name:        "run_command",
 			Description: "Run a command in the terminal. Ability to run in local directory on an empty path or with a declared path.",
-			Parameters: parameters{
+			Parameters: ollama.Parameters{
 				Type:     "object",
 				Required: []string{"command"},
 				Properties: map[string]any{
@@ -190,10 +143,10 @@ var allTools = []tool{
 	},
 	{
 		Type: "function",
-		Function: toolFunction{
+		Function: ollama.ToolFunction{
 			Name:        "create_plan",
 			Description: "create a plan to keep you organized with task descriptions and their status which could be pending, in_progress, or done",
-			Parameters: parameters{
+			Parameters: ollama.Parameters{
 				Type:     "object",
 				Required: []string{"descriptions"},
 				Properties: map[string]any{
@@ -208,10 +161,10 @@ var allTools = []tool{
 	},
 	{
 		Type: "function",
-		Function: toolFunction{
+		Function: ollama.ToolFunction{
 			Name:        "update_plan",
 			Description: "update the status of a step in the plan",
-			Parameters: parameters{
+			Parameters: ollama.Parameters{
 				Type:     "object",
 				Required: []string{"id", "status"},
 				Properties: map[string]any{
@@ -244,8 +197,8 @@ func isProtected(path string) bool {
 	return protectedFiles[filepath.Base(path)]
 }
 
-func buildChatRequest(history []message, model string) chatRequest {
-	var outgoing chatRequest
+func buildChatRequest(history []ollama.Message, model string) ollama.ChatRequest {
+	var outgoing ollama.ChatRequest
 
 	outgoing.Messages = history
 	outgoing.Model = model
@@ -254,28 +207,6 @@ func buildChatRequest(history []message, model string) chatRequest {
 	outgoing.Tools = allTools
 
 	return outgoing
-}
-
-func postRequest(outGoingMessage chatRequest, ollamaHost string) (chatResponse, error) {
-	// this is probably not needed but whatever
-	b, err := json.Marshal(outGoingMessage)
-	if err != nil {
-		return chatResponse{}, fmt.Errorf("serializing request error %v: ", err)
-	}
-
-	body := bytes.NewBuffer(b)
-	url := ollamaHost + "/api/chat"
-
-	resp, err := http.Post(url, "application/json", body)
-	if err != nil {
-		return chatResponse{}, fmt.Errorf("error contacting ollama at %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	var output chatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&output); err != nil {
-		return chatResponse{}, fmt.Errorf("error decoding response: %w", err)
-	}
-	return output, nil
 }
 
 func startSpinner(done chan bool) {
@@ -294,25 +225,7 @@ func startSpinner(done chan bool) {
 	}
 }
 
-func getModels(ollamaHost string) []string {
-	resp, err := http.Get(ollamaHost + "/api/tags")
-	if err != nil {
-		log.Fatalf("call to get ollama ls failed: %v", err)
-	}
-	defer resp.Body.Close()
-	var modelOutput modelWrapper
-	if err := json.NewDecoder(resp.Body).Decode(&modelOutput); err != nil {
-		log.Fatalf("failed to get model output %v:", err)
-	}
-
-	stringOutput := make([]string, len(modelOutput.Models))
-	for i := 0; i < len(modelOutput.Models); i++ {
-		stringOutput[i] = modelOutput.Models[i].Name
-	}
-	return stringOutput
-}
-
-func handleToolCall(call toolCall, app *App) message {
+func handleToolCall(call ollama.ToolCall, app *App) ollama.Message {
 	toolName := call.Function.Name
 	switch toolName {
 	case "list_directory":
@@ -327,7 +240,7 @@ func handleToolCall(call toolCall, app *App) message {
 			dirString = dirString + " " + val.Name()
 		}
 
-		ldMessage := message{
+		ldMessage := ollama.Message{
 			Role:    "tool",
 			Content: dirString,
 			// what do do with the tool calls?,
@@ -346,11 +259,11 @@ func handleToolCall(call toolCall, app *App) message {
 	case "update_plan":
 		return updatePlanItemHelper(&call, &app.CurrentPlan)
 	default:
-		return message{}
+		return ollama.Message{}
 	}
 }
 
-func createPlanHelper(call *toolCall, app *App) message {
+func createPlanHelper(call *ollama.ToolCall, app *App) ollama.Message {
 	var descriptions []string
 	if rawDesc, ok := call.Function.Arguments["descriptions"].([]any); ok {
 		for _, a := range rawDesc {
@@ -360,7 +273,7 @@ func createPlanHelper(call *toolCall, app *App) message {
 		}
 	}
 	if len(descriptions) == 0 {
-		return message{
+		return ollama.Message{
 			Role:    "tool",
 			Content: "error: at least one description is required",
 		}
@@ -384,17 +297,17 @@ func createPlanHelper(call *toolCall, app *App) message {
 
 	app.CurrentPlan = planItemList
 
-	return message{
+	return ollama.Message{
 		Role:    "tool",
 		Content: fmt.Sprintf("New plan created succesfully: %v", returnString),
 	}
 }
 
-func updatePlanItemHelper(call *toolCall, itemList *[]plan.Item) message {
+func updatePlanItemHelper(call *ollama.ToolCall, itemList *[]plan.Item) ollama.Message {
 	// seemss a little absurd to store them as float 64s but its whats returned from the json unmarshaling
 	id, ok := call.Function.Arguments["id"].(float64)
 	if !ok {
-		return message{
+		return ollama.Message{
 			Role:    "tool",
 			Content: "error: invalid id",
 		}
@@ -402,7 +315,7 @@ func updatePlanItemHelper(call *toolCall, itemList *[]plan.Item) message {
 
 	status, ok := call.Function.Arguments["status"].(string)
 	if !ok {
-		return message{
+		return ollama.Message{
 			Role:    "tool",
 			Content: "error: invalid status",
 		}
@@ -413,7 +326,7 @@ func updatePlanItemHelper(call *toolCall, itemList *[]plan.Item) message {
 			if (*itemList)[i].Id == id {
 				(*itemList)[i].Status = plan.Status(status)
 
-				return message{
+				return ollama.Message{
 					Role:    "tool",
 					Content: "succesfully updated plan item",
 				}
@@ -421,22 +334,22 @@ func updatePlanItemHelper(call *toolCall, itemList *[]plan.Item) message {
 		}
 
 	default:
-		return message{
+		return ollama.Message{
 			Role:    "tool",
 			Content: "error invalid status",
 		}
 	}
 
-	return message{
+	return ollama.Message{
 		Role:    "tool",
 		Content: "no plan item found with that ID",
 	}
 }
 
-func runCommandHelper(call *toolCall) message {
+func runCommandHelper(call *ollama.ToolCall) ollama.Message {
 	command, ok := call.Function.Arguments["command"].(string)
 	if !ok || command == "" {
-		return message{
+		return ollama.Message{
 			Role:    "tool",
 			Content: "error: invalid command",
 		}
@@ -466,29 +379,29 @@ func runCommandHelper(call *toolCall) message {
 	fmt.Scanln(&response)
 
 	if strings.ToLower(strings.TrimSpace(response)) != "y" {
-		return message{Role: "tool", Content: "command canceled by user"}
+		return ollama.Message{Role: "tool", Content: "command canceled by user"}
 	}
 	cmd := exec.Command(command, arguments...)
 	cmd.Dir = dir
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return message{
+		return ollama.Message{
 			Role:    "tool",
 			Content: fmt.Sprintf("error: Command Failed: %v \nOutput: %s", err, output),
 		}
 	}
 
-	return message{
+	return ollama.Message{
 		Role:    "tool",
 		Content: fmt.Sprintf("Command ran succesfully, output: %v ", string(output)),
 	}
 }
 
-func createFileHelper(call *toolCall, root string) message {
+func createFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	fileName, ok := call.Function.Arguments["path"].(string)
 	if !ok {
-		return message{
+		return ollama.Message{
 			Role:    "tool",
 			Content: "error: invalid file name: ",
 		}
@@ -496,19 +409,19 @@ func createFileHelper(call *toolCall, root string) message {
 
 	fileName, err := resolveSafePath(root, fileName)
 	if err != nil {
-		return message{Role: "tool", Content: "error: path is possibly dangerous"}
+		return ollama.Message{Role: "tool", Content: "error: path is possibly dangerous"}
 	}
 
 	// deal with creating the directories if the path is not just example.go but place/example.go
 	dir := filepath.Dir(fileName)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return message{Role: "tool", Content: fmt.Sprintf("error creating directory %v", err)}
+		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error creating directory %v", err)}
 	}
 
 	newFile, err := os.Create(fileName)
 	if err != nil {
 		content := fmt.Sprintf("error creating file: %v", err)
-		return message{
+		return ollama.Message{
 			Role:    "tool",
 			Content: content,
 		}
@@ -516,7 +429,7 @@ func createFileHelper(call *toolCall, root string) message {
 	defer newFile.Close()
 
 	outGoingContent := fmt.Sprintf("%v file created", newFile.Name())
-	outGoingMessage := message{
+	outGoingMessage := ollama.Message{
 		Role:    "tool",
 		Content: outGoingContent,
 	}
@@ -534,41 +447,41 @@ func prefixLines(text string, prefix string) string {
 	return strings.Join(lines, "\n")
 }
 
-func editFileHelper(call *toolCall, root string) message {
+func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	path, ok := call.Function.Arguments["path"].(string)
 	if !ok {
-		return message{Role: "tool", Content: "error: no path provided"}
+		return ollama.Message{Role: "tool", Content: "error: no path provided"}
 	}
 	if isProtected(path) {
-		return message{Role: "tool", Content: "error: file is protected"}
+		return ollama.Message{Role: "tool", Content: "error: file is protected"}
 	}
 	path, err := resolveSafePath(root, path)
 	if err != nil {
-		return message{Role: "tool", Content: "error: path is possibly dangerous"}
+		return ollama.Message{Role: "tool", Content: "error: path is possibly dangerous"}
 	}
 
 	oldText, ok := call.Function.Arguments["old_text"].(string)
 	if !ok {
-		return message{Role: "tool", Content: "error no old text found"}
+		return ollama.Message{Role: "tool", Content: "error no old text found"}
 	}
 
 	newText, ok := call.Function.Arguments["new_text"].(string)
 	if !ok {
-		return message{Role: "tool", Content: "error no new text found"}
+		return ollama.Message{Role: "tool", Content: "error no new text found"}
 	}
 
 	fileContentBytes, err := os.ReadFile(path)
 	if err != nil {
-		return message{Role: "tool", Content: fmt.Sprintf("error: finding file: %v", err)}
+		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: finding file: %v", err)}
 	}
 	fileContent := string(fileContentBytes)
 	count := strings.Count(fileContent, oldText)
 
 	if count == 0 {
-		return message{Role: "tool", Content: "error old text not found in file"}
+		return ollama.Message{Role: "tool", Content: "error old text not found in file"}
 	}
 	if count > 1 {
-		return message{Role: "tool", Content: "error: old text matches multiple locations be specific"}
+		return ollama.Message{Role: "tool", Content: "error: old text matches multiple locations be specific"}
 	}
 
 	newContent := strings.Replace(fileContent, oldText, newText, 1)
@@ -583,27 +496,27 @@ func editFileHelper(call *toolCall, root string) message {
 	fmt.Scanln(&response)
 
 	if strings.ToLower(strings.TrimSpace(response)) != "y" {
-		return message{Role: "tool", Content: "Edit canceled by user"}
+		return ollama.Message{Role: "tool", Content: "Edit canceled by user"}
 	}
 
 	err = os.WriteFile(path, []byte(newContent), 0o644)
 	if err != nil {
-		return message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
+		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
 	}
-	return message{Role: "tool", Content: fmt.Sprintf("%v file editted succesfully", path)}
+	return ollama.Message{Role: "tool", Content: fmt.Sprintf("%v file editted succesfully", path)}
 }
 
-func readFileHelper(call *toolCall, root string) message {
+func readFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	path, ok := call.Function.Arguments["path"].(string)
 	if !ok {
-		return message{
+		return ollama.Message{
 			Role:    "tool",
 			Content: "error: no path provided",
 		}
 	}
 	path, err := resolveSafePath(root, path)
 	if err != nil {
-		return message{
+		return ollama.Message{
 			Role:    "tool",
 			Content: "error: path is possibly dangerous",
 		}
@@ -615,7 +528,7 @@ func readFileHelper(call *toolCall, root string) message {
 		// dont need to log fatal but need to handle if we cant read from that path
 		//
 		content := fmt.Sprintf("error reading file in path: %v", err)
-		return message{
+		return ollama.Message{
 			Role:    "tool",
 			Content: content,
 		}
@@ -623,14 +536,14 @@ func readFileHelper(call *toolCall, root string) message {
 
 	fileContents := string(fileContentBytes)
 
-	outGoingMessage := message{
+	outGoingMessage := ollama.Message{
 		Role:    "tool",
 		Content: fileContents,
 	}
 	return outGoingMessage
 }
 
-func toolCallHelper(toolCalls []toolCall, history *[]message, depth int, failCount int, app *App) {
+func toolCallHelper(toolCalls []ollama.ToolCall, history *[]ollama.Message, depth int, failCount int, app *App) {
 	if depth > 8 {
 		fmt.Println("depth of tool call hit 8 breaking out")
 		return
@@ -650,7 +563,7 @@ func toolCallHelper(toolCalls []toolCall, history *[]message, depth int, failCou
 	postToolChatRequest := buildChatRequest(*history, app.CurrentModel)
 	done := make(chan bool)
 	go startSpinner(done)
-	toolResponse, err := postRequest(postToolChatRequest, app.OllamaHost)
+	toolResponse, err := ollama.Chat(postToolChatRequest, app.OllamaHost)
 	done <- true
 	if err != nil {
 		fmt.Println("error:", err)
@@ -674,7 +587,7 @@ func toolCallHelper(toolCalls []toolCall, history *[]message, depth int, failCou
 }
 
 func (a *App) chooseModels() string {
-	models := getModels(a.OllamaHost)
+	models := ollama.ListModels(a.OllamaHost)
 	fmt.Println("Available models to choose from")
 
 	for idx, val := range models {
@@ -704,7 +617,7 @@ func (a *App) chooseModels() string {
 	return modelChosen
 }
 
-func (a *App) handleLoad() (*[]message, error) {
+func (a *App) handleLoad() (*[]ollama.Message, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -761,7 +674,7 @@ func (a *App) handleLoad() (*[]message, error) {
 	if err != nil {
 		return nil, err
 	}
-	var loaded []message
+	var loaded []ollama.Message
 	if err := json.Unmarshal(data, &loaded); err != nil {
 		return nil, err
 	}
@@ -769,7 +682,7 @@ func (a *App) handleLoad() (*[]message, error) {
 	return &loaded, nil
 }
 
-func (a *App) handleSave(history *[]message) error {
+func (a *App) handleSave(history *[]ollama.Message) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -822,7 +735,7 @@ func (a *App) handleSave(history *[]message) error {
 	return nil
 }
 
-func (a *App) handleCLICommand(command string, history *[]message) {
+func (a *App) handleCLICommand(command string, history *[]ollama.Message) {
 	switch command {
 	case "/change-model":
 		a.CurrentModel = a.chooseModels()
@@ -840,7 +753,7 @@ func (a *App) handleCLICommand(command string, history *[]message) {
 			*history = *loaded
 		}
 	case "/clear":
-		*history = []message{a.SystemPrompt}
+		*history = []ollama.Message{a.SystemPrompt}
 
 	case "/help":
 		fmt.Println(`Available Commands
@@ -876,7 +789,7 @@ func resolveSafePath(root string, requestedPath string) (string, error) {
 	return absPath, nil
 }
 
-func estimateTokens(messages []message) int {
+func estimateTokens(messages []ollama.Message) int {
 	totalTokens := 0
 	for _, val := range messages {
 		text := val.Content
@@ -941,7 +854,7 @@ func main() {
 	fmt.Println("Welcome to MetCode")
 	metCodeApp.CurrentModel = metCodeApp.chooseModels()
 
-	var history []message
+	var history []ollama.Message
 	var sysContent string
 
 	home, err := os.UserHomeDir()
@@ -956,7 +869,7 @@ func main() {
 
 	sysContent = string(sysContentRaw)
 
-	systemMessage := message{
+	systemMessage := ollama.Message{
 		Role:    "system",
 		Content: sysContent,
 	}
@@ -981,7 +894,7 @@ func main() {
 			metCodeApp.handleCLICommand(input, &history)
 			continue
 		}
-		var newMessage message
+		var newMessage ollama.Message
 		newMessage.Content = input
 		newMessage.Role = "user"
 		history = append(history, newMessage)
@@ -990,7 +903,7 @@ func main() {
 
 		done := make(chan bool)
 		go startSpinner(done)
-		response, err := postRequest(outgoingChatRequest, ollamaHost)
+		response, err := ollama.Chat(outgoingChatRequest, ollamaHost)
 		done <- true
 		if err != nil {
 			fmt.Println("error", err)

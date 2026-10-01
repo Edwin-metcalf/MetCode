@@ -4,12 +4,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Edwin-metcalf/MetCode/internal/ollama"
 	"github.com/Edwin-metcalf/MetCode/internal/plan"
 )
 
 func TestReadDirectoryHelper_ValidFile(t *testing.T) {
-	call := &toolCall{
-		Function: calledFunction{
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
 			Name:      "read_file",
 			Arguments: map[string]any{"path": "main.go"},
 		},
@@ -26,8 +27,8 @@ func TestReadDirectoryHelper_ValidFile(t *testing.T) {
 }
 
 func TestReadDirectoryHelper_NoPath(t *testing.T) {
-	call := &toolCall{
-		Function: calledFunction{
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
 			Name:      "read_file",
 			Arguments: map[string]any{},
 		},
@@ -39,8 +40,8 @@ func TestReadDirectoryHelper_NoPath(t *testing.T) {
 }
 
 func TestProtectedFiles(t *testing.T) {
-	call := &toolCall{
-		Function: calledFunction{
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
 			Name:      "edit_file",
 			Arguments: map[string]any{"path": "main.go", "old_text": "package main\ngood code:)", "new_text": "bad code:("},
 		},
@@ -53,8 +54,8 @@ func TestProtectedFiles(t *testing.T) {
 }
 
 func TestEditFileValid(t *testing.T) {
-	call := &toolCall{
-		Function: calledFunction{
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
 			Name:      "edit_file",
 			Arguments: map[string]any{"path": "example.go", "old_text": "bad stuff :(", "new_text": "good stuff :)"},
 		},
@@ -71,8 +72,8 @@ func TestEditFileValid(t *testing.T) {
 }
 
 func TestReadFileHelper_PathEscapesRoot(t *testing.T) {
-	call := &toolCall{
-		Function: calledFunction{
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
 			Name:      "read_file",
 			Arguments: map[string]any{"path": "../../../passwords"},
 		},
@@ -85,8 +86,8 @@ func TestReadFileHelper_PathEscapesRoot(t *testing.T) {
 }
 
 func TestEditFileHelper_PathEscapesRoot(t *testing.T) {
-	call := &toolCall{
-		Function: calledFunction{
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
 			Name:      "edit_file",
 			Arguments: map[string]any{"path": "../outside.go", "old_text": "foo", "new_text": "bar"},
 		},
@@ -103,8 +104,8 @@ func TestUpdatePlanItemHelper_ValidUpdate(t *testing.T) {
 		{Id: 2.0, Description: "write tests", Status: plan.StatusPending},
 	}
 
-	call := &toolCall{
-		Function: calledFunction{
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
 			Name: "update_plan",
 			Arguments: map[string]any{
 				"id":     1.0,
@@ -133,8 +134,8 @@ func TestUpdatePlanItemHelper_InvalidStatus(t *testing.T) {
 		{Id: 1.0, Description: "read main.go", Status: plan.StatusPending},
 	}
 
-	call := &toolCall{
-		Function: calledFunction{
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
 			Name: "update_plan",
 			Arguments: map[string]any{
 				"id":     1.0,
@@ -155,8 +156,8 @@ func TestUpdatePlanItemHelper_InvalidStatus(t *testing.T) {
 
 func TestCreatePlanHelper_MissingDescriptions(t *testing.T) {
 	app := &App{}
-	call := &toolCall{
-		Function: calledFunction{
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
 			Name:      "create_plan",
 			Arguments: map[string]any{},
 		},
@@ -178,8 +179,8 @@ func TestCreatePlanHelper_DoesNotClobberExistingPlan(t *testing.T) {
 			{Id: 1.0, Description: "existing step", Status: plan.StatusInProgress},
 		},
 	}
-	call := &toolCall{
-		Function: calledFunction{
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
 			Name:      "create_plan",
 			Arguments: map[string]any{},
 		},
