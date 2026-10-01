@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/Edwin-metcalf/MetCode/internal/plan"
 )
 
 func TestReadDirectoryHelper_ValidFile(t *testing.T) {
@@ -96,9 +98,9 @@ func TestEditFileHelper_PathEscapesRoot(t *testing.T) {
 }
 
 func TestUpdatePlanItemHelper_ValidUpdate(t *testing.T) {
-	items := []planItem{
-		{Id: 1.0, Description: "read main.go", Status: statusPending},
-		{Id: 2.0, Description: "write tests", Status: statusPending},
+	items := []plan.Item{
+		{Id: 1.0, Description: "read main.go", Status: plan.StatusPending},
+		{Id: 2.0, Description: "write tests", Status: plan.StatusPending},
 	}
 
 	call := &toolCall{
@@ -117,18 +119,18 @@ func TestUpdatePlanItemHelper_ValidUpdate(t *testing.T) {
 		t.Errorf("expected success but got %q", result.Content)
 	}
 
-	if items[0].Status != statusInProgress {
+	if items[0].Status != plan.StatusInProgress {
 		t.Errorf("expected item 0 to be in_progress, got %v", items[0].Status)
 	}
 
-	if items[1].Status != statusPending {
+	if items[1].Status != plan.StatusPending {
 		t.Errorf("item 1 should be untouched, got %v", items[1].Status)
 	}
 }
 
 func TestUpdatePlanItemHelper_InvalidStatus(t *testing.T) {
-	items := []planItem{
-		{Id: 1.0, Description: "read main.go", Status: statusPending},
+	items := []plan.Item{
+		{Id: 1.0, Description: "read main.go", Status: plan.StatusPending},
 	}
 
 	call := &toolCall{
@@ -146,7 +148,7 @@ func TestUpdatePlanItemHelper_InvalidStatus(t *testing.T) {
 	if !strings.Contains(result.Content, "error") {
 		t.Errorf("expected rejection of invalid status, got %q", result.Content)
 	}
-	if items[0].Status != statusPending {
+	if items[0].Status != plan.StatusPending {
 		t.Errorf("item should be untouched after rejected update, got %v", items[0].Status)
 	}
 }
@@ -172,8 +174,8 @@ func TestCreatePlanHelper_MissingDescriptions(t *testing.T) {
 
 func TestCreatePlanHelper_DoesNotClobberExistingPlan(t *testing.T) {
 	app := &App{
-		CurrentPlan: []planItem{
-			{Id: 1.0, Description: "existing step", Status: statusInProgress},
+		CurrentPlan: []plan.Item{
+			{Id: 1.0, Description: "existing step", Status: plan.StatusInProgress},
 		},
 	}
 	call := &toolCall{
@@ -188,7 +190,7 @@ func TestCreatePlanHelper_DoesNotClobberExistingPlan(t *testing.T) {
 	if len(app.CurrentPlan) != 1 {
 		t.Fatalf("expected existing plan to survive a rejected call, got %d items", len(app.CurrentPlan))
 	}
-	if app.CurrentPlan[0].Status != statusInProgress {
+	if app.CurrentPlan[0].Status != plan.StatusInProgress {
 		t.Errorf("existing item should be untouched")
 	}
 }

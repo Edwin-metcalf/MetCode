@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Edwin-metcalf/MetCode/internal/plan"
 	"github.com/joho/godotenv"
 )
 
@@ -34,7 +35,7 @@ type App struct {
 	Conversation string
 	SystemPrompt message
 	ProjectRoot  string
-	CurrentPlan  []planItem
+	CurrentPlan  []plan.Item
 }
 type message struct {
 	Role      string     `json:"role"`
@@ -81,19 +82,6 @@ type tool struct {
 }
 type options struct {
 	Temperature float64 `json:"temperature"`
-}
-type planStatus string
-
-const (
-	statusPending    planStatus = "pending"
-	statusInProgress planStatus = "in_progress"
-	statusDone       planStatus = "done"
-)
-
-type planItem struct {
-	Id          float64    `json:"id"`
-	Description string     `json:"description"`
-	Status      planStatus `json:"status"` // pending in_progress done
 }
 
 // this is if there is no system prompt in the ~./metcode then load up the default there
@@ -378,14 +366,14 @@ func createPlanHelper(call *toolCall, app *App) message {
 		}
 	}
 
-	var planItemList []planItem
+	var planItemList []plan.Item
 	curId := 1.0
 	returnString := "plan: "
 	for _, description := range descriptions {
-		newItem := planItem{
+		newItem := plan.Item{
 			Id:          curId,
 			Description: description,
-			Status:      planStatus("pending"),
+			Status:      plan.Status("pending"),
 		}
 		planItemList = append(planItemList, newItem)
 		localAdd := fmt.Sprintf("Id: %v, Description: %v, Status pending \n", curId, description)
@@ -402,7 +390,7 @@ func createPlanHelper(call *toolCall, app *App) message {
 	}
 }
 
-func updatePlanItemHelper(call *toolCall, itemList *[]planItem) message {
+func updatePlanItemHelper(call *toolCall, itemList *[]plan.Item) message {
 	// seemss a little absurd to store them as float 64s but its whats returned from the json unmarshaling
 	id, ok := call.Function.Arguments["id"].(float64)
 	if !ok {
@@ -419,11 +407,11 @@ func updatePlanItemHelper(call *toolCall, itemList *[]planItem) message {
 			Content: "error: invalid status",
 		}
 	}
-	switch planStatus(status) {
-	case statusDone, statusInProgress, statusPending:
+	switch plan.Status(status) {
+	case plan.StatusDone, plan.StatusInProgress, plan.StatusPending:
 		for i := range *itemList {
 			if (*itemList)[i].Id == id {
-				(*itemList)[i].Status = planStatus(status)
+				(*itemList)[i].Status = plan.Status(status)
 
 				return message{
 					Role:    "tool",
