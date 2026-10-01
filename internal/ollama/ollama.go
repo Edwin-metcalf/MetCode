@@ -1,3 +1,4 @@
+// ollama package this holds all the stuff that deals with the ollama server
 package ollama
 
 import (

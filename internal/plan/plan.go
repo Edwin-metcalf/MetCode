@@ -1,3 +1,4 @@
+// plan package a data type for the models to use
 package plan
 
 type Status string

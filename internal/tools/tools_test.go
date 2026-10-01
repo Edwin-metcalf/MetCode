@@ -1,6 +1,8 @@
-package main
+package tools
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -8,21 +10,26 @@ import (
 	"github.com/Edwin-metcalf/MetCode/internal/plan"
 )
 
-func TestReadDirectoryHelper_ValidFile(t *testing.T) {
+func TestReadFileHelper_ValidFile(t *testing.T) {
+	root := t.TempDir()
+	want := "hello metcode"
+	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte(want), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	call := &ollama.ToolCall{
 		Function: ollama.CalledFunction{
 			Name:      "read_file",
-			Arguments: map[string]any{"path": "main.go"},
+			Arguments: map[string]any{"path": "hello.txt"},
 		},
 	}
 
-	result := readFileHelper(call, ".")
+	result := readFileHelper(call, root)
 
 	if result.Role != "tool" {
 		t.Errorf("Role is not tool it is %v", result.Role)
 	}
 	if result.Content == "" {
-		t.Error("Content is empty ")
+		t.Errorf("expected %q, got %q", want, result.Content)
 	}
 }
 
@@ -155,43 +162,37 @@ func TestUpdatePlanItemHelper_InvalidStatus(t *testing.T) {
 }
 
 func TestCreatePlanHelper_MissingDescriptions(t *testing.T) {
-	app := &App{}
 	call := &ollama.ToolCall{
 		Function: ollama.CalledFunction{
 			Name:      "create_plan",
 			Arguments: map[string]any{},
 		},
 	}
-
-	result := createPlanHelper(call, app)
+	var items []plan.Item
+	result := createPlanHelper(call, &items)
 
 	if !strings.Contains(result.Content, "error") {
 		t.Errorf("expected error but got %q", result.Content)
 	}
-	if len(app.CurrentPlan) != 0 {
-		t.Errorf("plan should remain empty, got %d items", len(app.CurrentPlan))
+	if len(items) != 0 {
+		t.Errorf("plan should remain empty, got %d items", len(items))
 	}
 }
 
 func TestCreatePlanHelper_DoesNotClobberExistingPlan(t *testing.T) {
-	app := &App{
-		CurrentPlan: []plan.Item{
-			{Id: 1.0, Description: "existing step", Status: plan.StatusInProgress},
-		},
-	}
+	items := []plan.Item{{Id: 1.0, Description: "existing step", Status: plan.StatusInProgress}}
 	call := &ollama.ToolCall{
 		Function: ollama.CalledFunction{
 			Name:      "create_plan",
 			Arguments: map[string]any{},
 		},
 	}
+	_ = createPlanHelper(call, &items)
 
-	createPlanHelper(call, app)
-
-	if len(app.CurrentPlan) != 1 {
-		t.Fatalf("expected existing plan to survive a rejected call, got %d items", len(app.CurrentPlan))
+	if len(items) != 1 {
+		t.Errorf("expected existing plan to survive a rejected call, got %d items", len(items))
 	}
-	if app.CurrentPlan[0].Status != plan.StatusInProgress {
+	if items[0].Status != plan.StatusInProgress {
 		t.Errorf("existing item should be untouched")
 	}
 }
