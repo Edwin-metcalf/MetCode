@@ -3,16 +3,15 @@ package main
 import (
 	"bufio"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Edwin-metcalf/MetCode/internal/conversation"
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
 	"github.com/Edwin-metcalf/MetCode/internal/plan"
 	"github.com/Edwin-metcalf/MetCode/internal/prompt"
@@ -141,120 +140,65 @@ func (a *App) chooseModels() string {
 }
 
 func (a *App) handleLoad() (*[]ollama.Message, error) {
-	home, err := os.UserHomeDir()
+	dir, err := conversation.DefaultDir()
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(home, ".metcode", "conversations")
-	dirSlice, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("error reading directory: %w", err)
-	}
 
-	if len(dirSlice) == 0 {
+	names, err := conversation.List(dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(names) == 0 {
 		fmt.Println("No conversations saved!")
 		return nil, nil
 	}
-
-	var stringSlice []string
-	for _, val := range dirSlice {
-		stringSlice = append(stringSlice, val.Name())
+	for i, n := range names {
+		fmt.Printf("%d: %s\n", i+1, n)
 	}
-
-	var outputString string
-	totalFileNum := strconv.Itoa(len(stringSlice))
-
-	for idx, val := range stringSlice {
-		outputString += strconv.Itoa(idx+1) + ": " + val
-		if idx > 10 {
-			outputString += "10 files showing, total number of files: " + totalFileNum
-			break
-		}
-	}
-	fmt.Println(outputString)
 
 	if !a.Scanner.Scan() {
 		return nil, fmt.Errorf("error scanning input")
 	}
-	selectedInput := strings.TrimSpace(a.Scanner.Text())
-	nums := [10]string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}
-	var filePath string
+	choice := strings.TrimSpace(a.Scanner.Text())
 
-	if slices.Contains(nums[:], selectedInput) {
-		idx, err := strconv.Atoi(selectedInput)
-		if err != nil {
-			return nil, err
+	name := choice
+	if n, err := strconv.Atoi(choice); err == nil {
+		if n < 1 || n > len(names) {
+			return nil, fmt.Errorf("no conversation numbered %d", n)
 		}
-		filePath = filepath.Join(dir, stringSlice[idx-1])
-
-	} else if slices.Contains(stringSlice, selectedInput) {
-		filePath = filepath.Join(dir, selectedInput)
-	} else {
-		return nil, fmt.Errorf("bad input %q: use the number or file name shown", selectedInput)
+		name = names[n-1]
 	}
 
-	data, err := os.ReadFile(filePath)
+	loaded, err := conversation.Load(dir, name)
 	if err != nil {
 		return nil, err
 	}
-	var loaded []ollama.Message
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		return nil, err
-	}
-
+	a.Conversation = name
 	return &loaded, nil
 }
 
 func (a *App) handleSave(history *[]ollama.Message) error {
-	home, err := os.UserHomeDir()
+	dir, err := conversation.DefaultDir()
 	if err != nil {
 		return err
 	}
 
-	dir := filepath.Join(home, ".metcode", "conversations")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-
-	if a.Conversation == "" {
-
+	name := a.Conversation
+	if name == "" {
 		fmt.Println("What would you like the conversation to be named?")
-
 		if !a.Scanner.Scan() {
-			fmt.Println("error scanning")
 			return fmt.Errorf("error scanning")
 		}
-		conversationName := strings.TrimSpace(a.Scanner.Text())
-
-		if !strings.HasSuffix(conversationName, ".txt") {
-			conversationName += ".txt"
-		}
-
-		data, err := json.MarshalIndent(*history, "", "	")
-		if err != nil {
-			return err
-		}
-		err = os.WriteFile(filepath.Join(dir, conversationName), data, 0o644)
-		if err != nil {
-			fmt.Println("error saving file")
-			return err
-		}
-		a.Conversation = conversationName
-
-	} else {
-		data, err := json.MarshalIndent(*history, "", "	")
-		if err != nil {
-			return err
-		}
-
-		err = os.WriteFile(filepath.Join(dir, a.Conversation), data, 0o644)
-		if err != nil {
-			fmt.Println("error appending data")
-			return err
-		}
+		name = strings.TrimSpace(a.Scanner.Text())
 	}
 
-	fmt.Println("saving conversation")
+	saved, err := conversation.Save(dir, name, *history)
+	if err != nil {
+		return err
+	}
+	a.Conversation = saved
+	fmt.Println("saved conversation as", saved)
 	return nil
 }
 
