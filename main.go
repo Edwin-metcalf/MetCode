@@ -11,11 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Edwin-metcalf/MetCode/internal/agent"
 	"github.com/Edwin-metcalf/MetCode/internal/conversation"
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
-	"github.com/Edwin-metcalf/MetCode/internal/plan"
 	"github.com/Edwin-metcalf/MetCode/internal/prompt"
-	"github.com/Edwin-metcalf/MetCode/internal/tools"
 	"github.com/joho/godotenv"
 )
 
@@ -28,25 +27,10 @@ const banner = `
 	`
 
 type App struct {
-	CurrentModel string
 	Scanner      *bufio.Scanner
-	OllamaHost   string
 	Conversation string
 	SystemPrompt ollama.Message
-	ProjectRoot  string
-	CurrentPlan  []plan.Item
-}
-
-func buildChatRequest(history []ollama.Message, model string) ollama.ChatRequest {
-	var outgoing ollama.ChatRequest
-
-	outgoing.Messages = history
-	outgoing.Model = model
-	outgoing.Stream = false
-	outgoing.Options.Temperature = 0.1
-	outgoing.Tools = tools.All
-
-	return outgoing
+	Agent        *agent.Agent
 }
 
 func startSpinner(done chan bool) {
@@ -64,52 +48,14 @@ func startSpinner(done chan bool) {
 		}
 	}
 }
-
-func toolCallHelper(toolCalls []ollama.ToolCall, history *[]ollama.Message, depth int, failCount int, app *App) {
-	if depth > 8 {
-		fmt.Println("depth of tool call hit 8 breaking out")
-		return
-	}
-
-	if failCount > 3 {
-		fmt.Println("failed over and over again breaking out")
-		return
-	}
-	//fmt.Printf("depth: %v\n", depth)
-	//
-	for _, call := range toolCalls {
-		toolMessage := tools.Handle(call, app.ProjectRoot, &app.CurrentPlan)
-		*history = append(*history, toolMessage)
-	}
-
-	postToolChatRequest := buildChatRequest(*history, app.CurrentModel)
+func spin() func() {
 	done := make(chan bool)
 	go startSpinner(done)
-	toolResponse, err := ollama.Chat(postToolChatRequest, app.OllamaHost)
-	done <- true
-	if err != nil {
-		fmt.Println("error:", err)
-		return
-	}
-
-	*history = append(*history, toolResponse.Message)
-
-	if len(toolResponse.Message.ToolCalls) > 0 {
-
-		if strings.HasPrefix(toolResponse.Message.Content, "error") {
-			failCount += 1
-		} else {
-			failCount = 0
-		}
-		toolCallHelper(toolResponse.Message.ToolCalls, history, depth+1, failCount, app)
-	} else {
-		//fmt.Printf("DEBUG: %+v", toolResponse.Message)
-		fmt.Println(toolResponse.Message.Content)
-	}
+	return func() { done <- true }
 }
 
 func (a *App) chooseModels() string {
-	models := ollama.ListModels(a.OllamaHost)
+	models := ollama.ListModels(a.Agent.Host)
 	fmt.Println("Available models to choose from")
 
 	for idx, val := range models {
@@ -117,7 +63,7 @@ func (a *App) chooseModels() string {
 		fmt.Println(modelNum + ": " + val)
 	}
 	if !a.Scanner.Scan() {
-		return a.CurrentModel
+		return a.Agent.Model
 	}
 	modelChosen := strings.TrimSpace(a.Scanner.Text())
 
@@ -126,14 +72,14 @@ func (a *App) chooseModels() string {
 		if err != nil {
 			// what error should I throw here?
 			fmt.Printf("Invalif input '%s' keeping current model", modelChosen)
-			return a.CurrentModel
+			return a.Agent.Model
 		}
 
 		if 1 <= modelNum && modelNum <= len(models) {
 			modelChosen = models[modelNum-1]
 		} else {
 			fmt.Println("No model associated with that number keeping old")
-			return a.CurrentModel
+			return a.Agent.Model
 		}
 	}
 	return modelChosen
@@ -205,7 +151,7 @@ func (a *App) handleSave(history *[]ollama.Message) error {
 func (a *App) handleCLICommand(command string, history *[]ollama.Message) {
 	switch command {
 	case "/change-model":
-		a.CurrentModel = a.chooseModels()
+		a.Agent.Model = a.chooseModels()
 	case "/save":
 		if err := a.handleSave(history); err != nil {
 			fmt.Println("error saving:", err)
@@ -234,15 +180,6 @@ func (a *App) handleCLICommand(command string, history *[]ollama.Message) {
 	}
 }
 
-func estimateTokens(messages []ollama.Message) int {
-	totalTokens := 0
-	for _, val := range messages {
-		text := val.Content
-		totalTokens += len(text) / 4
-	}
-	return totalTokens
-}
-
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("no .env file found, using default local host")
@@ -261,17 +198,15 @@ func main() {
 	}
 
 	metCodeApp := &App{
-		CurrentModel: "",
 		Scanner:      scanner,
-		OllamaHost:   ollamaHost,
 		Conversation: "",
-		ProjectRoot:  workingDir,
+		Agent:        &agent.Agent{Host: ollamaHost, Root: workingDir, Wait: spin},
 	}
 	// get a scanner that runs on the while loop which should give us a running way to engage with the models
 
 	fmt.Println(banner)
 	fmt.Println("Welcome to MetCode")
-	metCodeApp.CurrentModel = metCodeApp.chooseModels()
+	metCodeApp.Agent.Model = metCodeApp.chooseModels()
 
 	var history []ollama.Message
 
@@ -310,33 +245,14 @@ func main() {
 			metCodeApp.handleCLICommand(input, &history)
 			continue
 		}
-		var newMessage ollama.Message
-		newMessage.Content = input
-		newMessage.Role = "user"
-		history = append(history, newMessage)
-
-		outgoingChatRequest := buildChatRequest(history, metCodeApp.CurrentModel)
-
-		done := make(chan bool)
-		go startSpinner(done)
-		response, err := ollama.Chat(outgoingChatRequest, ollamaHost)
-		done <- true
+		reply, err := metCodeApp.Agent.Turn(&history, input)
 		if err != nil {
-			fmt.Println("error", err)
-			history = history[:len(history)-1]
+			fmt.Println("error: ", err)
 			continue
 		}
-		history = append(history, response.Message)
 
-		if len(response.Message.ToolCalls) > 0 {
-			// call a tool call which then will re prompt the AI
-			toolCallHelper(response.Message.ToolCalls, &history, 0, 0, metCodeApp)
-		} else {
-			fmt.Println(response.Message.Content)
-		}
-
-		contextWindowlen := estimateTokens(history)
-		fmt.Printf("Estimated context window: %v \n", contextWindowlen)
+		fmt.Println(reply)
+		fmt.Printf("Estimated context window: %v \n", agent.EstimateTokens(history))
 
 	}
 }
