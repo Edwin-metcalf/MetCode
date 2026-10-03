@@ -55,3 +55,28 @@ func TestSave_RejectsBadNames(t *testing.T) {
 		})
 	}
 }
+
+func TestSave_AddsTxtSuffixOnce(t *testing.T) {
+	cases := map[string]string{
+		"chat":     "chat.txt",
+		"chat.txt": "chat.txt",
+		"  chat  ": "chat.txt",
+	}
+
+	for input, want := range cases {
+		t.Run(input, func(t *testing.T) {
+			dir := t.TempDir()
+
+			got, err := Save(dir, input, nil)
+			if err != nil {
+				t.Fatalf("Save(%q) returned error: %v", input, err)
+			}
+			if got != want {
+				t.Errorf("Save(%q) = %q, want %q", input, got, want)
+			}
+			if _, err := os.Stat(filepath.Join(dir, got)); err != nil {
+				t.Errorf("expected file %q to exist: %v", got, err)
+			}
+		})
+	}
+}

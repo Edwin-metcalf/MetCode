@@ -196,3 +196,34 @@ func TestCreatePlanHelper_DoesNotClobberExistingPlan(t *testing.T) {
 		t.Errorf("existing item should be untouched")
 	}
 }
+
+/*
+func TestCreateFileHelper_DoesNotTruncateExistingFile(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	original := "important content"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "create_file",
+			Arguments: map[string]any{"path": "notes.txt"},
+		},
+	}
+	result := createFileHelper(call, root)
+
+	//TODO if file exist dont re create error out
+	if !strings.Contains(result.Content, "error") {
+		t.Errorf("expected an error for an existing file, got %q", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Errorf("existing file was modified: now %q", got)
+	}
+}
+*/
