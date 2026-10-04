@@ -53,6 +53,10 @@ func readFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 
 	fileContents := string(fileContentBytes)
 
+	if fileContents == "" {
+		fileContents = "(file is empty if you to call edit file set old_text to empty string)"
+	}
+
 	outGoingMessage := ollama.Message{
 		Role:    "tool",
 		Content: fileContents,
@@ -75,12 +79,16 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 
 	oldText, ok := call.Function.Arguments["old_text"].(string)
 	if !ok {
-		return ollama.Message{Role: "tool", Content: "error no old text found"}
+		return ollama.Message{Role: "tool", Content: "error: missing required parameter old_text use an empty string for an empty file"}
 	}
 
 	newText, ok := call.Function.Arguments["new_text"].(string)
 	if !ok {
 		return ollama.Message{Role: "tool", Content: "error no new text found"}
+	}
+
+	if !strings.Contains(newText, "\n") && strings.Contains(newText, `\n`) {
+		return ollama.Message{Role: "tool", Content: "error: new_text contains the characters \\n instead of real line breaks. Resend using actual newlines"}
 	}
 
 	fileContentBytes, err := os.ReadFile(path)
@@ -91,10 +99,10 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	count := strings.Count(fileContent, oldText)
 
 	if count == 0 {
-		return ollama.Message{Role: "tool", Content: "error old text not found in file"}
+		return ollama.Message{Role: "tool", Content: "error: old_text not found in file. Call read_file and copy old_text exactly from its output, including indentation. Use a short unique snippet."}
 	}
 	if count > 1 {
-		return ollama.Message{Role: "tool", Content: "error: old text matches multiple locations be specific"}
+		return ollama.Message{Role: "tool", Content: "error: old_text matches multiple locations (or is empty but the file is not). Include more surrounding lines so it matches exactly once."}
 	}
 
 	newContent := strings.Replace(fileContent, oldText, newText, 1)

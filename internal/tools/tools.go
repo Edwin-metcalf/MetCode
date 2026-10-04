@@ -9,6 +9,7 @@ import (
 )
 
 func Handle(call ollama.ToolCall, root string, currentPlan *[]plan.Item) ollama.Message {
+	fmt.Printf("[tool] %s %v\n", call.Function.Name, call.Function.Arguments)
 	toolName := call.Function.Name
 	switch toolName {
 	case "list_directory":

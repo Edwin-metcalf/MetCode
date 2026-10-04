@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 )
@@ -38,6 +39,7 @@ type ChatResponse struct {
 
 type Options struct {
 	Temperature float64 `json:"temperature"`
+	NumCtx      int     `json:"num_ctx"`
 }
 
 type Tool struct {
@@ -80,6 +82,10 @@ func Chat(req ChatRequest, host string) (ChatResponse, error) {
 		return ChatResponse{}, fmt.Errorf("error contacting ollama at %s: %w", url, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(resp.Body)
+		return ChatResponse{}, fmt.Errorf("ollama returned %s: %s", resp.Status, msg)
+	}
 	var output ChatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&output); err != nil {
 		return ChatResponse{}, fmt.Errorf("error decoding response: %w", err)
