@@ -29,6 +29,7 @@ func (c *CLI) handleCommand(command string, history *[]ollama.Message) {
 		}
 	case "/clear":
 		*history = []ollama.Message{c.SystemPrompt}
+		fmt.Println("conversation history cleared")
 
 	case "/help":
 		fmt.Println(`Available Commands
@@ -36,6 +37,7 @@ func (c *CLI) handleCommand(command string, history *[]ollama.Message) {
 	- /change-model - Changes the model your using
 	- /save - Save the current conversation to a new conversation or an old one
 	- /load - Load a past conversation
+	- /clear - clears the history of the conversation back to the system prompt
 			`)
 	default:
 		fmt.Println("That is not a command I currently have try /help")

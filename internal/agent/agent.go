@@ -3,6 +3,7 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
@@ -11,7 +12,7 @@ import (
 )
 
 const (
-	maxToolRounds = 8
+	maxToolRounds = 12
 	maxFailRounds = 3
 )
 
@@ -35,7 +36,8 @@ func BuildChatRequest(history []ollama.Message, model string) ollama.ChatRequest
 	outgoing.Messages = history
 	outgoing.Model = model
 	outgoing.Stream = false
-	outgoing.Options.Temperature = 0.3
+	outgoing.Options.Temperature = 0.2
+	outgoing.Options.NumCtx = 32000
 	outgoing.Tools = tools.All
 
 	return outgoing
@@ -48,6 +50,13 @@ func EstimateTokens(messages []ollama.Message) int {
 		totalTokens += len(text) / 4
 	}
 	return totalTokens
+}
+
+func firstCallOnly(m ollama.Message) ollama.Message {
+	if len(m.ToolCalls) > 1 {
+		m.ToolCalls = m.ToolCalls[:1]
+	}
+	return m
 }
 
 func (a *Agent) chat(history []ollama.Message) (ollama.ChatResponse, error) {
@@ -69,7 +78,9 @@ func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error
 		return "", err
 	}
 
+	resp.Message = firstCallOnly(resp.Message)
 	*history = append(*history, resp.Message)
+	fmt.Printf("[debug] toolcalls=%d content=%q\n", len(resp.Message.ToolCalls), resp.Message.Content)
 
 	failRounds := 0
 
@@ -86,7 +97,7 @@ func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error
 			if !strings.HasPrefix(result.Content, "error") {
 				allFailed = false
 			}
-			*history = append(*history, resp.Message)
+			*history = append(*history, result)
 		}
 
 		if allFailed {
@@ -103,6 +114,7 @@ func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error
 		if err != nil {
 			return "", err
 		}
+		resp.Message = firstCallOnly(resp.Message)
 		*history = append(*history, resp.Message)
 	}
 	return resp.Message.Content, nil

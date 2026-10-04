@@ -67,7 +67,7 @@ var All = []ollama.Tool{
 					},
 					"old_text": map[string]any{
 						"type":        "string",
-						"description": "the text that was in the file. old_text must match the file's content exactly, including whitespace and indentation or the edit will fail.",
+						"description": "the text that was in the file. old_text must match the file's content exactly, including whitespace, indentation, and proper line breaks or the edit will fail.",
 					},
 					"new_text": map[string]any{
 						"type":        "string",

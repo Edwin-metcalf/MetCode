@@ -41,7 +41,8 @@ It provides an interactive interface for working with local LLMS and having your
 ```bash
 git clone https://github.com/Edwin-metcalf/MetCode
 cd MetCode
-go build -o ./cmd/metcode
+go build -o metcode ./cmd/metcode
+go install ./cmd/metcode
 ```
 Or if you have go installed:
 ```bash 
