@@ -86,6 +86,6 @@ func updatePlanItemHelper(call *ollama.ToolCall, itemList *[]plan.Item) ollama.M
 
 	return ollama.Message{
 		Role:    "tool",
-		Content: "no plan item found with that ID",
+		Content: "error: no plan item found with that ID",
 	}
 }

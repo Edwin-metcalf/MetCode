@@ -37,7 +37,7 @@ func BuildChatRequest(history []ollama.Message, model string) ollama.ChatRequest
 	outgoing.Model = model
 	outgoing.Stream = false
 	outgoing.Options.Temperature = 0.2
-	outgoing.Options.NumCtx = 32000
+	outgoing.Options.NumCtx = 4096
 	outgoing.Tools = tools.All
 
 	return outgoing

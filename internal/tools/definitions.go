@@ -92,7 +92,7 @@ var All = []ollama.Tool{
 					},
 					"path": map[string]any{
 						"type":        "string",
-						"description": "the path relative to the current directory. This is optional if it is empty it will automatically run in the current directory. Example: '/stuff/things/'",
+						"description": "the path relative to the current directory. This is optional if it is empty it will automatically run in the current directory. Must be relative and must stay inside the current directory. Example: 'stuff/things/'",
 					},
 					"arguments": map[string]any{
 						"type":        "array",

@@ -21,7 +21,7 @@ func Handle(call ollama.ToolCall, root string, currentPlan *[]plan.Item) ollama.
 	case "edit_file":
 		return editFileHelper(&call, root)
 	case "run_command":
-		return runCommandHelper(&call)
+		return runCommandHelper(&call, root)
 	case "create_plan":
 		return createPlanHelper(&call, currentPlan)
 	case "update_plan":

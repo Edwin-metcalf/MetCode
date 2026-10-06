@@ -1,3 +1,4 @@
 *.env
 /metcode
 /Metcode
+*AGENTS.md

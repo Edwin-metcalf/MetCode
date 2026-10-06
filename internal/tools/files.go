@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -136,6 +137,10 @@ func createFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 		}
 	}
 
+	if isProtected(fileName) {
+		return ollama.Message{Role: "tool", Content: "error: file is protected"}
+	}
+
 	fileName, err := resolveSafePath(root, fileName)
 	if err != nil {
 		return ollama.Message{Role: "tool", Content: "error: path is possibly dangerous"}
@@ -147,8 +152,12 @@ func createFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error creating directory %v", err)}
 	}
 
-	newFile, err := os.Create(fileName)
+	// O_EXCL so we never truncate a file the model did not mean to replace
+	newFile, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return ollama.Message{Role: "tool", Content: "error: file already exists, use edit_file instead"}
+		}
 		content := fmt.Sprintf("error creating file: %v", err)
 		return ollama.Message{
 			Role:    "tool",
