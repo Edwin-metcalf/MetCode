@@ -8,12 +8,19 @@ __  __      _    ____          _
 
  Local AI. Your Terminal. Your machines.
 </pre>
+<h3>Open-source coding agents for local models and modest hardware.</h3>
+
+<p> Run an agentic coding assistant on your own machine using Ollama specifically optimized for small models and budget hardware. </p>
 </div>
 
-Ran out of Claude Code tokens? Tokens too expensive? Don't want to send all your data to some big company? I wanted to better understand how agentic coding assistants work?
-Welcome to MetCode! A command line chat client for local LLMS. MetCode is built in Go on top of Ollama. 
 
----
+## Why Metcode?
+Ran out of Claude Code tokens? Tokens too expensive? Don't want to send all your data to some big company? I wanted to better understand how agentic coding assistants work? Old gaming PC with a 1080 in it?
+
+Welcome to MetCode! An approach to a local coding agent optimized for smaller models. 
+
+If small model optimization is interesting, you have an old GPU sitting around, or just want to experiment with local agents MetCode is right for you!
+
 ## Overview 
 MetCode is a local command line assistant built in Go on top of Ollama.
 It provides an interactive interface for working with local LLMS and having your own personal assistant.
@@ -29,7 +36,21 @@ It provides an interactive interface for working with local LLMS and having your
 * **Conversation Saving and Loading** to pick up where you left off
 
 
----
+## The Small Model Projet
+
+MetCode thrives on getting the most out of small models that are run offline. For situations like your laptop on a plane without wifi.
+
+The project is currently working toward:
+* Better prompts for 7-8B coding models (or smaller even)
+* Efficient context management
+* Compact tool definitions
+* Better tool outputs
+* Reduce unnecessary
+* Repeatable coding-agent benchmarks
+
+With a long term goal of how much can design make up for model size?
+
+
 ## Setup Guide
 
 ### Prerequisites
@@ -138,15 +159,8 @@ go test ./...
  
 Tests don't need a running Ollama server; the model API is faked with `httptest`.
  
-## Roadmap
- 
-- Web search tool
-- `/summarize` command
-- Terminal UI overhaul
-- Skills
-
-Ideas and bug reports are awlays welcome! open an issue.
  
 ## Contributing
  
+Ideas and bug reports are awlays welcome! open an issue.
 Contributions are welcome! I am learning and welcome any help I can get.
