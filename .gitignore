@@ -1,4 +1,10 @@
 *.env
 /metcode
 /Metcode
+/MetCode
 *AGENTS.md
+
+*.out
+coverage.out
+*.test
+.DS_Store

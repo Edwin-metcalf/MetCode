@@ -16,8 +16,8 @@ __  __      _    ____          _
 </div>
 
 
-## Why Metcode?
-Ran out of Claude Code tokens? Tokens too expensive? Don't want to send all your data to some big company? I wanted to better understand how agentic coding assistants work? Old gaming PC with a 1080 in it?
+## Why MetCode?
+Ran out of Claude Code tokens? Tokens too expensive? Don't want to send all your data to some big company? Want to better understand how coding assistants work? Old gaming PC with a 1080 in it?
 
 Welcome to MetCode! An approach to a local coding agent optimized for smaller models. 
 
@@ -25,7 +25,7 @@ If small model optimization is interesting, you have an old GPU sitting around, 
 
 ## Overview 
 MetCode is a local command line assistant built in Go on top of Ollama.
-It provides an interactive interface for working with local LLMS and having your own personal assistant.
+It provides an interactive interface for working with local LLMs and having your own personal assistant.
 
 ## MetCode includes
 * **Chatting with Local Ollama Server** no cost, no limits, and no data going to big companies!
@@ -38,7 +38,7 @@ It provides an interactive interface for working with local LLMS and having your
 * **Conversation Saving and Loading** to pick up where you left off
 
 
-## The Small Model Projet
+## The Small Model Project
 
 MetCode thrives on getting the most out of small models that are run offline. For situations like your laptop on a plane without wifi.
 
@@ -47,7 +47,7 @@ The project is currently working toward:
 * Efficient context management
 * Compact tool definitions
 * Better tool outputs
-* Reduce unnecessary
+* Reduce unnecessary tool calls and context clutter
 * Repeatable coding-agent benchmarks
 
 With a long term goal of how much can design make up for model size?
@@ -56,7 +56,7 @@ With a long term goal of how much can design make up for model size?
 ## Setup Guide
 
 ### Prerequisites
-* [Go](https://go.dev/dl/) (see `go.mod`for version I used)
+* [Go](https://go.dev/dl/) (see `go.mod` for version I used)
 * [Ollama](https://ollama.com) running somewhere you can reach — either on the same machine, or on another machine on your network (I use tailscale and an old gaming PC)
 * A model that supports tool calling. MetCode has been tested with llama3.1
 
@@ -64,7 +64,6 @@ With a long term goal of how much can design make up for model size?
 ```bash
 git clone https://github.com/Edwin-metcalf/MetCode
 cd MetCode
-go build -o metcode ./cmd/metcode
 go install ./cmd/metcode
 ```
 Or if you have go installed:
@@ -164,5 +163,4 @@ Tests don't need a running Ollama server; the model API is faked with `httptest`
  
 ## Contributing
  
-Ideas and bug reports are awlays welcome! open an issue.
-Contributions are welcome! I am learning and welcome any help I can get.
+Would love help on this project! See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test, and contribute. 
