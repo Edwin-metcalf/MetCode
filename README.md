@@ -11,6 +11,8 @@ __  __      _    ____          _
 <h3>Open-source coding agents for local models and modest hardware.</h3>
 
 <p> Run an agentic coding assistant on your own machine using Ollama specifically optimized for small models and budget hardware. </p>
+
+[![CI](https://github.com/Edwin-metcalf/MetCode/actions/workflows/ci.yml/badge.svg)](https://github.com/Edwin-metcalf/MetCode/actions/workflows/ci.yml)
 </div>
 
 
