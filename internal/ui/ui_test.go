@@ -70,10 +70,9 @@ func TestHandleCommand_ClearResetsHistoryAndPlan(t *testing.T) {
 	if len(history) != 1 || history[0].Role != "system" {
 		t.Errorf("history should be just the system prompt, got %+v", history)
 	}
-	//TODO does not get passed the plan in the commands.go but probablyshould
-	//if len(c.Agent.Plan) != 0 {
-	//	t.Errorf("plan should be cleared, got %d items: %v", len(c.Agent.Plan), c.Agent.Plan[0].Description)
-	//}
+	if len(c.Agent.Plan) != 0 {
+		t.Errorf("plan should be cleared, got %d items: %v", len(c.Agent.Plan), c.Agent.Plan[0].Description)
+	}
 }
 
 func TestHandleCommand_ChangeModel(t *testing.T) {
