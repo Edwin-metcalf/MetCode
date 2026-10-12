@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Edwin-metcalf/MetCode/internal/agent"
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
@@ -29,11 +30,26 @@ type CLI struct {
 
 func New(a *agent.Agent, systemPrompt string) *CLI {
 	a.Wait = Spinner
+	a.Stats = printStats
 	return &CLI{
 		Scanner:      bufio.NewScanner(os.Stdin),
 		Agent:        a,
 		SystemPrompt: ollama.Message{Role: "system", Content: systemPrompt},
 	}
+}
+func printStats(s agent.TurnStats) {
+	perSec := 0.0
+
+	if s.GenTime > 0 {
+		perSec = float64(s.OutputTokens) / s.GenTime.Seconds()
+	}
+
+	fmt.Printf("[stats] rounds=%d prompt_tok=%d out_tok=%d prefill=%s gen=%s (%.1f tok/s) load=%s total=%s\n",
+		s.Rounds, s.PromptTokens, s.OutputTokens,
+		s.PrefillTime.Round(time.Millisecond),
+		s.GenTime.Round(time.Millisecond), perSec,
+		s.LoadTime.Round(time.Millisecond),
+		s.WallTime.Round(time.Millisecond))
 }
 
 func (c *CLI) Run() {
@@ -72,6 +88,5 @@ func (c *CLI) Run() {
 		}
 
 		fmt.Println(reply)
-		fmt.Printf("Estimated context window: %v \n", agent.EstimateTokens(history))
 	}
 }

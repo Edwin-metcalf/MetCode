@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
 	"github.com/Edwin-metcalf/MetCode/internal/plan"
@@ -27,7 +28,26 @@ type Agent struct {
 	Root  string
 	Plan  []plan.Item
 	// returns runs when the request finishes (the UI uses it for the spinner).
-	Wait func() func()
+	Wait  func() func()
+	Stats func(TurnStats)
+}
+
+type TurnStats struct {
+	Rounds       int
+	PromptTokens int
+	OutputTokens int
+	PrefillTime  time.Duration
+	GenTime      time.Duration
+	LoadTime     time.Duration
+	WallTime     time.Duration
+}
+
+func addStats(s *TurnStats, r ollama.ChatResponse) {
+	s.PromptTokens += r.PromptEvalCount
+	s.OutputTokens += r.EvalCount
+	s.PrefillTime += time.Duration(r.PromptEvalDuration)
+	s.GenTime += time.Duration(r.EvalDuration)
+	s.LoadTime += time.Duration(r.LoadDuration)
 }
 
 func BuildChatRequest(history []ollama.Message, model string) ollama.ChatRequest {
@@ -41,15 +61,6 @@ func BuildChatRequest(history []ollama.Message, model string) ollama.ChatRequest
 	outgoing.Tools = tools.All
 
 	return outgoing
-}
-
-func EstimateTokens(messages []ollama.Message) int {
-	totalTokens := 0
-	for _, val := range messages {
-		text := val.Content
-		totalTokens += len(text) / 4
-	}
-	return totalTokens
 }
 
 func firstCallOnly(m ollama.Message) ollama.Message {
@@ -66,9 +77,23 @@ func (a *Agent) chat(history []ollama.Message) (ollama.ChatResponse, error) {
 	}
 	return ollama.Chat(BuildChatRequest(history, a.Model), a.Host)
 }
-
 func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error) {
+	start := time.Now()
+	var stats TurnStats
+
+	defer func() {
+		stats.WallTime = time.Since(start)
+		if a.Stats != nil {
+			a.Stats(stats)
+		}
+	}()
+	return a.runTurn(history, userInput, &stats)
+
+}
+
+func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *TurnStats) (string, error) {
 	//turns user input to history and runs the model tool loop until we have an anser without a tool call
+
 	*history = append(*history, ollama.Message{Role: "user", Content: userInput})
 
 	resp, err := a.chat(*history)
@@ -77,6 +102,7 @@ func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error
 		*history = (*history)[:len(*history)-1]
 		return "", err
 	}
+	addStats(stats, resp)
 
 	resp.Message = firstCallOnly(resp.Message)
 	*history = append(*history, resp.Message)
@@ -85,6 +111,7 @@ func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error
 	failRounds := 0
 
 	for round := 0; len(resp.Message.ToolCalls) > 0; round++ {
+		stats.Rounds += 1
 		if round >= maxToolRounds {
 			return "", ErrMaxRounds
 		}
@@ -114,6 +141,7 @@ func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error
 		if err != nil {
 			return "", err
 		}
+		addStats(stats, resp)
 		resp.Message = firstCallOnly(resp.Message)
 		*history = append(*history, resp.Message)
 	}

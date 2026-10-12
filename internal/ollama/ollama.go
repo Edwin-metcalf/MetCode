@@ -34,7 +34,13 @@ type ChatRequest struct {
 }
 
 type ChatResponse struct {
-	Message Message `json:"message"`
+	Message            Message `json:"message"`
+	LoadDuration       int64   `json:"load_duration"`
+	PromptEvalCount    int     `json:"prompt_eval_count"`
+	PromptEvalDuration int64   `json:"prompt_eval_duration"`
+	EvalCount          int     `json:"eval_count"`
+	EvalDuration       int64   `json:"eval_duration"`
+	TotalDuration      int64   `json:"total_duration"`
 }
 
 type Options struct {
