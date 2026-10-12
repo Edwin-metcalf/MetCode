@@ -33,6 +33,7 @@ type Agent struct {
 }
 
 type TurnStats struct {
+	Calls        int
 	Rounds       int
 	PromptTokens int
 	OutputTokens int
@@ -48,6 +49,23 @@ func addStats(s *TurnStats, r ollama.ChatResponse) {
 	s.PrefillTime += time.Duration(r.PromptEvalDuration)
 	s.GenTime += time.Duration(r.EvalDuration)
 	s.LoadTime += time.Duration(r.LoadDuration)
+}
+
+// logCall folds one model call into the turn totals and prints a line for it.
+// printing lives here rather than in addStats so the accumulator stays pure
+func logCall(s *TurnStats, r ollama.ChatResponse) {
+	addStats(s, r)
+	s.Calls++
+
+	perSec := 0.0
+	if r.EvalDuration > 0 {
+		perSec = float64(r.EvalCount) / time.Duration(r.EvalDuration).Seconds()
+	}
+	fmt.Printf("[call] %d prompt_tok=%d eval_tok=%d prefill=%s gen=%s (%.1f tok/s) load=%s\n",
+		s.Calls, r.PromptEvalCount, r.EvalCount,
+		time.Duration(r.PromptEvalDuration).Round(time.Millisecond),
+		time.Duration(r.EvalDuration).Round(time.Millisecond), perSec,
+		time.Duration(r.LoadDuration).Round(time.Millisecond))
 }
 
 func BuildChatRequest(history []ollama.Message, model string) ollama.ChatRequest {
@@ -102,7 +120,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 		*history = (*history)[:len(*history)-1]
 		return "", err
 	}
-	addStats(stats, resp)
+	logCall(stats, resp)
 
 	resp.Message = firstCallOnly(resp.Message)
 	*history = append(*history, resp.Message)
@@ -141,7 +159,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 		if err != nil {
 			return "", err
 		}
-		addStats(stats, resp)
+		logCall(stats, resp)
 		resp.Message = firstCallOnly(resp.Message)
 		*history = append(*history, resp.Message)
 	}

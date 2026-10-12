@@ -81,7 +81,7 @@ var All = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "run_command",
-			Description: "Run a command in the terminal. Ability to run in local directory on an empty path or with a declared path.",
+			Description: "Run a terminal command. Use only when the user asks you to run a command or when one is needed to complete the task not for responses in plain text.",
 			Parameters: ollama.Parameters{
 				Type:     "object",
 				Required: []string{"command"},

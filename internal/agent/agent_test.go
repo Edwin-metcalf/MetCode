@@ -80,6 +80,9 @@ func TestTurn_StatsSumAcrossRounds(t *testing.T) {
 		t.Fatalf("Turn returned error: %v", err)
 	}
 
+	if got.Calls != 2 {
+		t.Errorf("Calls = %d, want 2 (one tool round plus the final answer)", got.Calls)
+	}
 	if got.Rounds != 1 {
 		t.Errorf("Rounds = %d, want 1", got.Rounds)
 	}

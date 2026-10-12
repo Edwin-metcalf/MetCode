@@ -53,12 +53,34 @@ The project is currently working toward:
 With a long term goal of how much can design make up for model size?
 
 
+## Model notes
+
+Model choice affects MetCode more than any prompt or tool tweak measured so far.
+On the test machine (Ubuntu GPU: Nvidia 1080) with `num_ctx=4096`, three runs per input:
+
+| Model | Unnecessary tool calls | Prefill per turn |
+|---|---|---|
+| `qwen2.5-coder:7b` | 0 / 6 | ~50ms (only turn 1 is uncached) |
+| `llama3.1:latest` | 5 / 6 | ~1.4s (never cached) |
+
+* **Tool discipline.** Asked `hello` and `what is 2 + 2`, qwen2.5-coder answered
+  directly every time. llama3.1 reached for `run_command` or `list_directory` on
+  5 of 6 tries, costing an extra model round trip and an approval prompt per turn.
+* **Prompt caching.** qwen2.5-coder reuses the prompt prefix across turns, so only
+  the first turn of a session pays full prefill. llama3.1 pays ~1.4s of prefill on
+  every model call, making its turns roughly 7x slower end to end.
+
+Both models work. `qwen2.5-coder:7b` is the recommended default: fastest in
+practice, and least likely to call a tool when none is needed. 
+Llama tries to do more then it is asked on simple prompts.
+
+
 ## Setup Guide
 
 ### Prerequisites
 * [Go](https://go.dev/dl/) (see `go.mod` for version I used)
 * [Ollama](https://ollama.com) running somewhere you can reach — either on the same machine, or on another machine on your network (I use tailscale and an old gaming PC)
-* A model that supports tool calling. MetCode has been tested with llama3.1
+* A model that supports tool calling. Recommended: `qwen2.5-coder:7b` — see [Model notes](#model-notes)
 
 ### 1. Install
 ```bash
