@@ -60,21 +60,38 @@ func TestProtectedFiles(t *testing.T) {
 	}
 }
 
+// editing an existing file rewrites it on disk once the user confirms.
 func TestEditFileValid(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	path := filepath.Join(root, "code.go")
+	if err := os.WriteFile(path, []byte("package main\n\nfunc old() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	call := &ollama.ToolCall{
 		Function: ollama.CalledFunction{
 			Name:      "edit_file",
-			Arguments: map[string]any{"path": "example.go", "old_text": "bad stuff :(", "new_text": "good stuff :)"},
+			Arguments: map[string]any{"path": "code.go", "old_text": "func old() {}", "new_text": "func fresh() {}"},
 		},
 	}
-	result := editFileHelper(call, ".")
+	result := editFileHelper(call, root)
 
 	if result.Role != "tool" {
 		t.Errorf("error: Role is not a tool it is: %v", result.Role)
 	}
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected a successful edit, got %q", result.Content)
+	}
 
-	if result.Content == "" {
-		t.Error("content is empty")
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "package main\n\nfunc fresh() {}\n"
+	if string(got) != want {
+		t.Errorf("file on disk = %q, want %q", got, want)
 	}
 }
 
@@ -197,7 +214,7 @@ func TestCreatePlanHelper_DoesNotClobberExistingPlan(t *testing.T) {
 	}
 }
 
-func TestCreateFileHelper_DoesNotTruncateExistingFile(t *testing.T) {
+func TestEditFileHelper_DoesNotTruncateExistingFile(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "notes.txt")
 	original := "important content"
@@ -205,16 +222,18 @@ func TestCreateFileHelper_DoesNotTruncateExistingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// an empty old_text means "create", but this file already exists. It must be
+	// refused rather than treated as empty, or the content would be wiped.
 	call := &ollama.ToolCall{
 		Function: ollama.CalledFunction{
-			Name:      "create_file",
-			Arguments: map[string]any{"path": "notes.txt"},
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "notes.txt", "old_text": "", "new_text": "replacement"},
 		},
 	}
-	result := createFileHelper(call, root)
+	result := editFileHelper(call, root)
 
-	if !strings.Contains(result.Content, "error") {
-		t.Errorf("expected an error for an existing file, got %q", result.Content)
+	if !strings.HasPrefix(result.Content, "error") {
+		t.Errorf("expected an error for an empty old_text on an existing file, got %q", result.Content)
 	}
 	got, err := os.ReadFile(path)
 	if err != nil {
@@ -225,7 +244,7 @@ func TestCreateFileHelper_DoesNotTruncateExistingFile(t *testing.T) {
 	}
 }
 
-func TestCreateFileHelper_RefusesProtectedFile(t *testing.T) {
+func TestEditFileHelper_RefusesProtectedFile(t *testing.T) {
 	root := t.TempDir()
 	original := "module example.com/m\n"
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(original), 0o644); err != nil {
@@ -234,14 +253,14 @@ func TestCreateFileHelper_RefusesProtectedFile(t *testing.T) {
 
 	call := &ollama.ToolCall{
 		Function: ollama.CalledFunction{
-			Name:      "create_file",
-			Arguments: map[string]any{"path": "go.mod"},
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "go.mod", "old_text": "", "new_text": "module replaced\n"},
 		},
 	}
-	result := createFileHelper(call, root)
+	result := editFileHelper(call, root)
 
 	if !strings.HasPrefix(result.Content, "error") {
-		t.Errorf("create_file should refuse a protected file, got %q", result.Content)
+		t.Errorf("edit_file should refuse a protected file, got %q", result.Content)
 	}
 	got, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
@@ -252,22 +271,135 @@ func TestCreateFileHelper_RefusesProtectedFile(t *testing.T) {
 	}
 }
 
-func TestCreateFileHelper_CreatesNewFileInSubdirectory(t *testing.T) {
+func TestEditFileHelper_CreatesNewFileInSubdirectory(t *testing.T) {
+	feedStdin(t, "y\n")
+
 	root := t.TempDir()
+	content := "package sub\n"
 
 	call := &ollama.ToolCall{
 		Function: ollama.CalledFunction{
-			Name:      "create_file",
-			Arguments: map[string]any{"path": "sub/dir/example.go"},
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "sub/dir/example.go", "old_text": "", "new_text": content},
 		},
 	}
-	result := createFileHelper(call, root)
+	result := editFileHelper(call, root)
 
 	if strings.HasPrefix(result.Content, "error") {
 		t.Fatalf("expected success, got %q", result.Content)
 	}
-	if _, err := os.Stat(filepath.Join(root, "sub", "dir", "example.go")); err != nil {
-		t.Errorf("expected nested file to exist: %v", err)
+	got, err := os.ReadFile(filepath.Join(root, "sub", "dir", "example.go"))
+	if err != nil {
+		t.Fatalf("expected nested file to exist: %v", err)
+	}
+	if string(got) != content {
+		t.Errorf("file content = %q, want %q", got, content)
+	}
+}
+
+func TestEditFileHelper_CreatesFileWhenOldTextEmpty(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	content := "hello from create\n"
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "new.txt", "old_text": "", "new_text": content},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected success, got %q", result.Content)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "new.txt"))
+	if err != nil {
+		t.Fatalf("expected file to be created: %v", err)
+	}
+	if string(got) != content {
+		t.Errorf("file content = %q, want %q", got, content)
+	}
+}
+
+func TestEditFileHelper_MissingFileWithOldTextErrors(t *testing.T) {
+	root := t.TempDir()
+
+	// the model named a substring to replace, but there is no file to hold it.
+	// That is a mistake and must error, not silently create a partial file.
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "ghost.txt", "old_text": "something", "new_text": "else"},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if !strings.HasPrefix(result.Content, "error") {
+		t.Errorf("expected an error, got %q", result.Content)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ghost.txt")); !os.IsNotExist(err) {
+		t.Errorf("no file should have been created, stat err = %v", err)
+	}
+}
+
+func TestEditFileHelper_CreateCanceledByUser(t *testing.T) {
+	emptyStdin(t) // an empty stdin declines the y/n confirm
+
+	root := t.TempDir()
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "canceled.txt", "old_text": "", "new_text": "nope"},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if result.Content != "Edit canceled by user" {
+		t.Errorf("expected cancel message, got %q", result.Content)
+	}
+	if _, err := os.Stat(filepath.Join(root, "canceled.txt")); !os.IsNotExist(err) {
+		t.Errorf("a declined create must not write the file, stat err = %v", err)
+	}
+}
+
+func TestEditFileHelper_RejectsBadOldText(t *testing.T) {
+	cases := map[string]struct {
+		fileContent string
+		oldText     string
+	}{
+		"old_text not found":        {fileContent: "keep me\n", oldText: "not present"},
+		"old_text matches multiple": {fileContent: "dup\ndup\n", oldText: "dup"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "notes.txt")
+			if err := os.WriteFile(path, []byte(tc.fileContent), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			call := &ollama.ToolCall{
+				Function: ollama.CalledFunction{
+					Name:      "edit_file",
+					Arguments: map[string]any{"path": "notes.txt", "old_text": tc.oldText, "new_text": "x"},
+				},
+			}
+			result := editFileHelper(call, root)
+
+			if !strings.HasPrefix(result.Content, "error") {
+				t.Errorf("expected an error prefix, got %q", result.Content)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.fileContent {
+				t.Errorf("file should be untouched, got %q", got)
+			}
+		})
 	}
 }
 
@@ -298,13 +430,17 @@ func TestRunCommandHelper_RejectsPathEscapingRoot(t *testing.T) {
 	}
 }
 
-// emptyStdin points os.Stdin at an empty reader so the y/n confirm in
-// run_command returns immediately instead of blocking on the real terminal.
-func emptyStdin(t *testing.T) {
+// feedStdin points os.Stdin at a pipe pre-loaded with input so a y/n confirm
+// reads the answer instead of blocking on the real terminal. Closing the write
+// end means any further reads return EOF, which a confirm treats as "no".
+func feedStdin(t *testing.T, input string) {
 	t.Helper()
 	old := os.Stdin
 	r, w, err := os.Pipe()
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString(input); err != nil {
 		t.Fatal(err)
 	}
 	w.Close()
@@ -313,6 +449,12 @@ func emptyStdin(t *testing.T) {
 		os.Stdin = old
 		r.Close()
 	})
+}
+
+// emptyStdin is the "decline the confirm" case used by the run_command tests.
+func emptyStdin(t *testing.T) {
+	t.Helper()
+	feedStdin(t, "")
 }
 
 func TestRunCommandHelper_AcceptsPathInsideRoot(t *testing.T) {

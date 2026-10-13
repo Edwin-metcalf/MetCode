@@ -51,14 +51,13 @@ depends on it; nothing depends on `ui`.
 
 ## Adding or changing a tool
 
-You have to touch **four places** or the model will never see your change:
+You have to touch **three places** or the model will never see your change:
 
 1. `internal/tools/definitions.go` — append to the package-level `tools.All` slice, which is
    sent on every request.
 2. `internal/tools/tools.go` — add the tool name to the `Handle` switch.
 3. The handler itself (`files.go`, `command.go`, or `planhelpers.go`), taking an
    `*ollama.ToolCall`.
-4. `internal/prompt/system_prompt.md` — the prose tool list the model reads.
 
 **Hard contract:** every handler must return an `ollama.Message` with `Role: "tool"`, and every
 failure must have a `Content` that starts with the literal string `error`. The runaway-loop
@@ -75,8 +74,10 @@ These are known and and cause it to work any fix's would need larger discussion.
   already run MetCode.
 - **Everything is jailed by `resolveSafePath`.** Every file tool and `run_command` resolve paths
   against the launch directory. Absolute `run_command` paths are rejected outright.
-- **`create_file` never truncates.** It uses `O_EXCL` and errors if the file exists, pointing the
-  model at `edit_file`. Check `isProtected` in any new file handler; protected files match on
+- **File creation goes through `edit_file`** To save tokens and simplify for small models create_file
+  was combined with edit_file. Edit file with an empty old_text creates the file (and parent directories). 
+  An existing file is only written when old_text matches exacly once, so a normal edit cannot silently 
+  truncate it. Check `isProtected` in any new file handler; protected files match on
   basename only.
 - **Only the first tool call per assistant message runs** (`firstCallOnly`). Extra calls in the
   same message are dropped silently.
