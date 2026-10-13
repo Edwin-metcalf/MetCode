@@ -124,7 +124,6 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 
 	resp.Message = firstCallOnly(resp.Message)
 	*history = append(*history, resp.Message)
-	fmt.Printf("[debug] toolcalls=%d content=%q\n", len(resp.Message.ToolCalls), resp.Message.Content)
 
 	failRounds := 0
 
