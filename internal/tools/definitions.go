@@ -38,25 +38,8 @@ var All = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "create_file",
-			Description: "creates a new empty file. Use edit_file after to add content",
-			Parameters: ollama.Parameters{
-				Type:     "object",
-				Required: []string{"path"},
-				Properties: map[string]any{
-					"path": map[string]any{
-						"type":        "string",
-						"description": "relative path and name of a file. Relative to the current working directory. Examples: 'example.go' or 'stuff/example.go'",
-					},
-				},
-			},
-		},
-	},
-	{
-		Type: "function",
-		Function: ollama.ToolFunction{
 			Name:        "edit_file",
-			Description: "edit a file. If the file is empty (e.g. just created with create_file), use an empty string for old_text. If the file is not empty old_text will have its contents read with read_file and you are editing those contents",
+			Description: "Edit an existing file by replacing old_text with new_text. To create a new file, pass an empty old_text and put the entire file contents in new_text. old_text must match the file exactly and appear only once. Call read_file first and copy it from the real content.",
 			Parameters: ollama.Parameters{
 				Type:     "object",
 				Required: []string{"path", "old_text", "new_text"},
@@ -67,11 +50,11 @@ var All = []ollama.Tool{
 					},
 					"old_text": map[string]any{
 						"type":        "string",
-						"description": "the text that was in the file. old_text must match the file's content exactly, including whitespace, indentation, and proper line breaks or the edit will fail.",
+						"description": "The exact text to replace, including whitespace. Must appear exactly once. For a new file, use an empty string '' and new_text becomes the whole file.",
 					},
 					"new_text": map[string]any{
 						"type":        "string",
-						"description": "the new text that is going into the file after the edit",
+						"description": "The replacement text. This is the entire new contents.",
 					},
 				},
 			},

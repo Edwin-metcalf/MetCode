@@ -97,7 +97,6 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	if errors.Is(err, os.ErrNotExist) {
 
 		if oldText != "" {
-			//couldnt we hypothetically just set old text to "" letting this run cause we know it is not overwritting anything?
 			return ollama.Message{Role: "tool", Content: "error: file does not exist but old_text is not empty"}
 		}
 
