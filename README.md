@@ -30,7 +30,7 @@ It provides an interactive interface for working with local LLMs and having your
 ## MetCode includes
 * **Chatting with Local Ollama Server** no cost, no limits, and no data going to big companies!
 * **Model Selection** Download and use whatever model you want and `/change-model` mid session
-* **File Tools** list directory, read files, create files, edit files, all sandboxed to the directory metcode is launched from
+* **File Tools** list directory, read files, create files or edit files, all sandboxed to the directory metcode is launched from
 * **Command Execution** Can run shell commands in your directory
 * **Confirmation Before Changes** Every edit and command execution shows a diff and only completes after user input
 * **Planning** for multi step tasks the model can write and update a plan as it works
@@ -45,7 +45,7 @@ MetCode thrives on getting the most out of small models that are run offline. Fo
 The project is currently working toward:
 * Better prompts for 7-8B coding models (or smaller even)
 * Efficient context management
-* Compact tool definitions
+* Compact tool definitions (folded file_creation into edit_file, saving a model round trip and context tokens)
 * Better tool outputs
 * Reduce unnecessary tool calls and context clutter
 * Repeatable coding-agent benchmarks
@@ -185,7 +185,8 @@ Tests don't need a running Ollama server; the model API is faked with `httptest`
 ## Known limitations
 - Small/local models hallucinate tools or produce malformed tool calls
 - Only the first tool call per assistant message is executed; extras are dropped
-- `create_file` never overwrites (it errors if the file exists)
+- Creating a file uses `edit_file` with and empty old_text. An existing file is only changed when old_text matches exactly once, so a normal edit never truncates it.
+- An edit rewrites the whole file after you confirm, so changes made to the file while the confirmation is pending are overwritten.
 - `run_command` and file tools are jailed to the launch directory; absolute command paths are rejected
 - Editing the repo's `system_prompt.md` won't affect users who already ran MetCode once
  
