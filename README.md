@@ -181,6 +181,13 @@ go test ./...
 ```
  
 Tests don't need a running Ollama server; the model API is faked with `httptest`.
+
+## Known limitations
+- Small/local models hallucinate tools or produce malformed tool calls
+- Only the first tool call per assistant message is executed; extras are dropped
+- `create_file` never overwrites (it errors if the file exists)
+- `run_command` and file tools are jailed to the launch directory; absolute command paths are rejected
+- Editing the repo's `system_prompt.md` won't affect users who already ran MetCode once
  
  
 ## Contributing
