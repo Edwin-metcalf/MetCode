@@ -16,8 +16,8 @@ func Handle(call ollama.ToolCall, root string, currentPlan *[]plan.Item) ollama.
 		return listDirectoryHelper(root)
 	case "read_file":
 		return readFileHelper(&call, root)
-	case "create_file":
-		return createFileHelper(&call, root)
+	//case "create_file":
+	//	return createFileHelper(&call, root)
 	case "edit_file":
 		return editFileHelper(&call, root)
 	case "run_command":

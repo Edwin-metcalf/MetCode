@@ -93,9 +93,23 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	}
 
 	fileContentBytes, err := os.ReadFile(path)
-	if err != nil {
+
+	if errors.Is(err, os.ErrNotExist) {
+
+		if oldText != "" {
+			//couldnt we hypothetically just set old text to "" letting this run cause we know it is not overwritting anything?
+			return ollama.Message{Role: "tool", Content: "error: file does not exist but old_text is not empty"}
+		}
+
+		return createFileHelper(path, newText)
+
+	} else if err != nil {
+		//other errs
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: finding file: %v", err)}
+
 	}
+
+	//there is a file with content
 	fileContent := string(fileContentBytes)
 	count := strings.Count(fileContent, oldText)
 
@@ -128,50 +142,31 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	return ollama.Message{Role: "tool", Content: fmt.Sprintf("%v file editted succesfully", path)}
 }
 
-func createFileHelper(call *ollama.ToolCall, root string) ollama.Message {
-	fileName, ok := call.Function.Arguments["path"].(string)
-	if !ok {
-		return ollama.Message{
-			Role:    "tool",
-			Content: "error: invalid file name: ",
-		}
+func createFileHelper(path string, newText string) ollama.Message {
+	//helper to create a file if edit file is called on a file that does not exist
+	fmt.Println("----- proposed change to new file: ", path, "------")
+	fmt.Println(prefixLines(newText, "+ "))
+	fmt.Println("------------------------------")
+	fmt.Println("apply this edit? (y/n)")
+
+	var response string
+	fmt.Scanln(&response)
+
+	if strings.ToLower(strings.TrimSpace(response)) != "y" {
+		return ollama.Message{Role: "tool", Content: "Edit canceled by user"}
 	}
 
-	if isProtected(fileName) {
-		return ollama.Message{Role: "tool", Content: "error: file is protected"}
-	}
-
-	fileName, err := resolveSafePath(root, fileName)
-	if err != nil {
-		return ollama.Message{Role: "tool", Content: "error: path is possibly dangerous"}
-	}
-
-	// deal with creating the directories if the path is not just example.go but place/example.go
-	dir := filepath.Dir(fileName)
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error creating directory %v", err)}
 	}
 
-	// O_EXCL so we never truncate a file the model did not mean to replace
-	newFile, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
+	err := os.WriteFile(path, []byte(newText), 0o644)
 	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return ollama.Message{Role: "tool", Content: "error: file already exists, use edit_file instead"}
-		}
-		content := fmt.Sprintf("error creating file: %v", err)
-		return ollama.Message{
-			Role:    "tool",
-			Content: content,
-		}
+		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
 	}
-	defer newFile.Close()
 
-	outGoingContent := fmt.Sprintf("%v file created", newFile.Name())
-	outGoingMessage := ollama.Message{
-		Role:    "tool",
-		Content: outGoingContent,
-	}
-	return outGoingMessage
+	return ollama.Message{Role: "tool", Content: fmt.Sprintf("%v file created successfully", path)}
 }
 
 func prefixLines(text string, prefix string) string {
