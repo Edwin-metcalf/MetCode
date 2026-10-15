@@ -133,6 +133,7 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 			argsData[newKey] = val
 			delete(argsData, oldKey)
 		}
+
 		jsonData, err := json.Marshal(argsData)
 		if err != nil {
 			fmt.Printf("error marshaling tool call: %v\n", err)
@@ -166,6 +167,19 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 
 		noPrefixMessage := ollama.Message{Role: m.Role, Content: noTagString, ToolCalls: m.ToolCalls}
 		return a.normalizeMessage(noPrefixMessage)
+
+	case strings.HasPrefix(m.Content, "{\"function\":}"):
+		argsMap := make(map[string]interface{})
+
+		err := json.Unmarshal([]byte(m.Content), &argsMap)
+
+		if err != nil {
+			fmt.Printf("error unmarshaling tool call: %v\n", err)
+			return m
+		}
+		stringToolCall := argsMap["function"].(string)
+
+		return a.normalizeMessage(ollama.Message{Role: m.Role, Content: stringToolCall, ToolCalls: m.ToolCalls})
 
 	default:
 		//base case can be just return the message cause it should pass all the checks we do her
