@@ -123,8 +123,7 @@ type rawCall struct {
 
 func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 	//right now only four cases but might have more possibly expand to more helpers in that case
-	//var jsonArgsToolPattern = regexp.MustCompile(`\{"name":\s*".*?",\s*"arguments":\s*\{.*?\}\}`)
-	//var jsonParamsToolPattern = regexp.MustCompile(`\{"name":\s*".*?",\s*"parameters":\s*\{.*?\}\}`)
+	//future case if the user is actually asking for a json that hs {"name": "example"} it will try to tool call it
 
 	if len(m.ToolCalls) > 0 {
 		return m
@@ -141,12 +140,15 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 		return a.normalizeMessage(noPrefixMessage)
 	}
 
+	if !strings.HasPrefix(stripped, "{") {
+		return m
+	}
+
 	var rawData rawCall
 
 	err := json.Unmarshal([]byte(stripped), &rawData)
 
 	if err != nil {
-		//question on what to return
 		fmt.Printf("error unmarshaling tool call: %v\n", err)
 		return m
 	}
@@ -164,7 +166,6 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 
 		if args == nil {
 			args = rawData.Parameters
-
 		}
 	}
 
