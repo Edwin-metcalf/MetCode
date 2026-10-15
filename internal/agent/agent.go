@@ -114,10 +114,34 @@ func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error
 func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 	//right now only four cases but might have more possibly expand to more helpers in that case
 	var jsonArgsToolPattern = regexp.MustCompile(`\{"name":\s*".*?",\s*"arguments":\s*\{.*?\}\}`)
+	var jsonParamsToolPattern = regexp.MustCompile(`\{"name":\s*".*?",\s*"parameters":\s*\{.*?\}\}`)
+
 	switch true {
 	case jsonArgsToolPattern.MatchString(m.Content):
+		var argsData map[string]interface{}
+		err := json.Unmarshal([]byte(m.Content), &argsData)
+
+		if err != nil {
+			//question on what to return
+			fmt.Printf("error unmarshaling tool call: %v\n", err)
+			return m
+		}
+		oldKey := "arguments"
+		newKey := "parameters"
+
+		if val, ok := argsData[oldKey]; ok {
+			argsData[newKey] = val
+			delete(argsData, oldKey)
+		}
+		jsonData, err := json.Marshal(argsData)
+		if err != nil {
+			fmt.Printf("error marshaling tool call: %v\n", err)
+			return m
+		}
+
 		var toolCall ollama.ToolCall
-		err := json.Unmarshal([]byte(m.Content), &toolCall)
+
+		err = json.Unmarshal(jsonData, &toolCall)
 
 		if err != nil {
 			//question on what to return
@@ -125,10 +149,23 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 			return m
 		}
 		return tools.Handle(toolCall, a.Root, &a.Plan)
+
+	case jsonParamsToolPattern.MatchString(m.Content):
+		var toolCall ollama.ToolCall
+		err := json.Unmarshal([]byte(m.Content), &toolCall)
+
+		if err != nil {
+			fmt.Printf("error unmarshaling tool call: %v\n", err)
+			return m
+		}
+		return tools.Handle(toolCall, a.Root, &a.Plan)
+
+	default:
+		//base case can be just return the message cause it should pass all the checks we do her
+		return m
+
 	}
 
-	//base case can be just return the message cause it should pass all the checks we do here
-	return m
 }
 
 func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *TurnStats) (string, error) {
