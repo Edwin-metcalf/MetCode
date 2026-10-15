@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -111,81 +110,69 @@ func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error
 
 }
 
+type rawCall struct {
+	Name       string         `json:"name"`
+	Arguments  map[string]any `json:"arguments"`
+	Parameters map[string]any `json:"parameters"`
+	Function   *struct {
+		Name       string         `json:"name"`
+		Arguments  map[string]any `json:"arguments"`
+		Parameters map[string]any `json:"parameters"`
+	} `json:"function"`
+}
+
 func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 	//right now only four cases but might have more possibly expand to more helpers in that case
-	var jsonArgsToolPattern = regexp.MustCompile(`\{"name":\s*".*?",\s*"arguments":\s*\{.*?\}\}`)
-	var jsonParamsToolPattern = regexp.MustCompile(`\{"name":\s*".*?",\s*"parameters":\s*\{.*?\}\}`)
+	//var jsonArgsToolPattern = regexp.MustCompile(`\{"name":\s*".*?",\s*"arguments":\s*\{.*?\}\}`)
+	//var jsonParamsToolPattern = regexp.MustCompile(`\{"name":\s*".*?",\s*"parameters":\s*\{.*?\}\}`)
 
-	switch true {
-	case jsonArgsToolPattern.MatchString(m.Content):
-		var argsData map[string]interface{}
-		err := json.Unmarshal([]byte(m.Content), &argsData)
+	if len(m.ToolCalls) > 0 {
+		return m
+	}
 
-		if err != nil {
-			//question on what to return
-			fmt.Printf("error unmarshaling tool call: %v\n", err)
-			return m
-		}
-		oldKey := "arguments"
-		newKey := "parameters"
+	stripped := strings.TrimSpace(m.Content)
 
-		if val, ok := argsData[oldKey]; ok {
-			argsData[newKey] = val
-			delete(argsData, oldKey)
-		}
-
-		jsonData, err := json.Marshal(argsData)
-		if err != nil {
-			fmt.Printf("error marshaling tool call: %v\n", err)
-			return m
-		}
-
-		var toolCall ollama.ToolCall
-
-		err = json.Unmarshal(jsonData, &toolCall)
-
-		if err != nil {
-			//question on what to return
-			fmt.Printf("error unmarshaling tool call: %v\n", err)
-			return m
-		}
-		return tools.Handle(toolCall, a.Root, &a.Plan)
-
-	case jsonParamsToolPattern.MatchString(m.Content):
-		var toolCall ollama.ToolCall
-		err := json.Unmarshal([]byte(m.Content), &toolCall)
-
-		if err != nil {
-			fmt.Printf("error unmarshaling tool call: %v\n", err)
-			return m
-		}
-		return tools.Handle(toolCall, a.Root, &a.Plan)
-
-	case strings.HasPrefix(m.Content, "<tool_call>"):
-		noTagString := strings.TrimPrefix(m.Content, "<tool_call>")
+	if strings.HasPrefix(stripped, "<tool_call>") {
+		noTagString := strings.TrimPrefix(stripped, "<tool_call>")
 		noTagString = strings.TrimSuffix(noTagString, "</tool_call>")
+		noTagString = strings.TrimSpace(noTagString)
 
 		noPrefixMessage := ollama.Message{Role: m.Role, Content: noTagString, ToolCalls: m.ToolCalls}
 		return a.normalizeMessage(noPrefixMessage)
-
-	case strings.HasPrefix(m.Content, "{\"function\":}"):
-		argsMap := make(map[string]interface{})
-
-		err := json.Unmarshal([]byte(m.Content), &argsMap)
-
-		if err != nil {
-			fmt.Printf("error unmarshaling tool call: %v\n", err)
-			return m
-		}
-		stringToolCall := argsMap["function"].(string)
-
-		return a.normalizeMessage(ollama.Message{Role: m.Role, Content: stringToolCall, ToolCalls: m.ToolCalls})
-
-	default:
-		//base case can be just return the message cause it should pass all the checks we do her
-		return m
-
 	}
+
+	var rawData rawCall
+
+	err := json.Unmarshal([]byte(stripped), &rawData)
+
+	if err != nil {
+		//question on what to return
+		fmt.Printf("error unmarshaling tool call: %v\n", err)
+		return m
+	}
+	name, args := "", map[string]any(nil)
+
+	if rawData.Function != nil {
+		name = rawData.Function.Name
+		args = rawData.Function.Arguments
+		if args == nil {
+			args = rawData.Function.Parameters
+		}
+	} else {
+		name = rawData.Name
+		args = rawData.Arguments
+
+		if args == nil {
+			args = rawData.Parameters
+
+		}
+	}
+
+	if name == "" {
+		return m
+	}
+
+	return ollama.Message{Role: m.Role, Content: "", ToolCalls: []ollama.ToolCall{{Function: ollama.CalledFunction{Name: name, Arguments: args}}}}
 
 }
 
@@ -203,6 +190,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 	logCall(stats, resp)
 
 	resp.Message = firstCallOnly(resp.Message)
+	resp.Message = a.normalizeMessage(resp.Message)
 	*history = append(*history, resp.Message)
 
 	failRounds := 0
@@ -238,8 +226,10 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 		if err != nil {
 			return "", err
 		}
+
 		logCall(stats, resp)
 		resp.Message = firstCallOnly(resp.Message)
+		resp.Message = a.normalizeMessage(resp.Message)
 		*history = append(*history, resp.Message)
 	}
 	return resp.Message.Content, nil
