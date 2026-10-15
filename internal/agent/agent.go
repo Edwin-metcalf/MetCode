@@ -160,6 +160,13 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 		}
 		return tools.Handle(toolCall, a.Root, &a.Plan)
 
+	case strings.HasPrefix(m.Content, "<tool_call>"):
+		noTagString := strings.TrimPrefix(m.Content, "<tool_call>")
+		noTagString = strings.TrimSuffix(noTagString, "</tool_call>")
+
+		noPrefixMessage := ollama.Message{Role: m.Role, Content: noTagString, ToolCalls: m.ToolCalls}
+		return a.normalizeMessage(noPrefixMessage)
+
 	default:
 		//base case can be just return the message cause it should pass all the checks we do her
 		return m
