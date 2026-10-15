@@ -2,8 +2,10 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -107,6 +109,26 @@ func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error
 	}()
 	return a.runTurn(history, userInput, &stats)
 
+}
+
+func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
+	//right now only four cases but might have more possibly expand to more helpers in that case
+	var jsonArgsToolPattern = regexp.MustCompile(`\{"name":\s*".*?",\s*"arguments":\s*\{.*?\}\}`)
+	switch true {
+	case jsonArgsToolPattern.MatchString(m.Content):
+		var toolCall ollama.ToolCall
+		err := json.Unmarshal([]byte(m.Content), &toolCall)
+
+		if err != nil {
+			//question on what to return
+			fmt.Printf("error unmarshaling tool call: %v\n", err)
+			return m
+		}
+		return tools.Handle(toolCall, a.Root, &a.Plan)
+	}
+
+	//base case can be just return the message cause it should pass all the checks we do here
+	return m
 }
 
 func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *TurnStats) (string, error) {
