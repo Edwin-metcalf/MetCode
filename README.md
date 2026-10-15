@@ -30,7 +30,8 @@ It provides an interactive interface for working with local LLMs and having your
 ## MetCode includes
 * **Chatting with Local Ollama Server** no cost, no limits, and no data going to big companies!
 * **Model Selection** Download and use whatever model you want and `/change-model` mid session
-* **File Tools** list directory, read files, create files or edit files, all sandboxed to the directory metcode is launched from
+* **File Tools** List directory, read files, create files or edit files, all sandboxed to the directory metcode is launched from
+* **Robust Tool Calls** Recovers tool calls that small models write as plain text, so a model that fumbles the format still gets the work done
 * **Command Execution** Can run shell commands in your directory
 * **Confirmation Before Changes** Every edit and command execution shows a diff and only completes after user input
 * **Planning** for multi step tasks the model can write and update a plan as it works
@@ -42,10 +43,13 @@ It provides an interactive interface for working with local LLMs and having your
 
 MetCode thrives on getting the most out of small models that are run offline. For situations like your laptop on a plane without wifi.
 
+Steps this project has taken to optimize small model performance:
+* Recovering tool calls small models write as plain text or in malformed ways
+* Compact tool definitions (folded file_creation into edit_file, saving a model round trip and context tokens)
+
 The project is currently working toward:
 * Better prompts for 7-8B coding models (or smaller even)
 * Efficient context management
-* Compact tool definitions (folded file_creation into edit_file, saving a model round trip and context tokens)
 * Better tool outputs
 * Reduce unnecessary tool calls and context clutter
 * Repeatable coding-agent benchmarks
@@ -55,24 +59,39 @@ With a long term goal of how much can design make up for model size?
 
 ## Model notes
 
-Model choice affects MetCode more than any prompt or tool tweak measured so far.
-On the test machine (Ubuntu GPU: Nvidia 1080) with `num_ctx=4096`, three runs per input:
+Model choice affects MetCode more than any prompt or tool tweak measured so far. The two models used most with MetCode in development are 
+qwqn2.5-coder:7b and llama3.1:latest. Both run on the test machine (Ubuntu GPU: Nvidia 1080) with `num_ctx=4096`.
 
-| Model | Unnecessary tool calls | Prefill per turn |
-|---|---|---|
-| `qwen2.5-coder:7b` | 0 / 6 | ~50ms (only turn 1 is uncached) |
-| `llama3.1:latest` | 5 / 6 | ~1.4s (never cached) |
+| Model | Unnecessary tool calls | Calls a tool when asked | Prefill per turn |
+|---|---|---|---|
+| `qwen2.5-coder:7b` | 0 / 6 | unreliable | ~50ms (only turn 1 is uncached) |
+| `llama3.1:latest` | 5 / 6 | reliable | ~1.4s (never cached) |
 
-* **Tool discipline.** Asked `hello` and `what is 2 + 2`, qwen2.5-coder answered
-  directly every time. llama3.1 reached for `run_command` or `list_directory` on
-  5 of 6 tries, costing an extra model round trip and an approval prompt per turn.
-* **Prompt caching.** qwen2.5-coder reuses the prompt prefix across turns, so only
-  the first turn of a session pays full prefill. llama3.1 pays ~1.4s of prefill on
-  every model call, making its turns roughly 7x slower end to end.
+### qwen2.5-coder:7b
 
-Both models work. `qwen2.5-coder:7b` is the recommended default: fastest in
-practice, and least likely to call a tool when none is needed. 
-Llama tries to do more then it is asked on simple prompts.
+Strengths
+- Tool restraint: greetings and small talk get direct answers. Asked "hello" and "what is 2 + 2" it answered directly every time, with no extra round trip and no approval prompt.
+- Speed: reuses the prompt cache across turns, so only the first turn pays full prefill (~1.5s). Later turns prefill in ~45-90ms, making it several times faster end to end.
+
+Weaknesses
+- Tool calls are unreliable. It often answers with the code or an explanation instead of invoking a tool, and may need to be pushed ("actually use the tool") before it calls one.
+- When it does write a call as plain text, it sometimes wraps it in a markdown code fence, which MetCode's recovery currently missess.
+
+### llama3.1:latest
+
+Strengths
+- Reliable tool use. When a tool is needed it calls the right one on the first try. Listing a directory, editing a file, and running a command all worked without prompting.
+- Natural replies. Its final plain-text answers read well, so an unnecessary call is easy to miss unless you watch the `[tool]` lines.
+
+Weaknesses
+- Over-calls. It reaches for `list_directory` or `read_file` on greetings, thanks, and small talk, even right after being told no calls were needed. Each one costs an extra model round trip and an approval prompt.
+- No prompt caching: it pays ~1.4s of prefill on every call, so its turns are roughly 7x slower.
+
+### Which to use
+
+- `qwen2.5-coder:7b` is the recommended default for speed and restraint, with the caveat that tool calls sometimes need a nudge.
+- `llama3.1:latest` is the better pick when tool use needs to just work and you can accept the extra calls and the slower turns.
+
 
 
 ## Setup Guide
@@ -80,7 +99,7 @@ Llama tries to do more then it is asked on simple prompts.
 ### Prerequisites
 * [Go](https://go.dev/dl/) (see `go.mod` for version I used)
 * [Ollama](https://ollama.com) running somewhere you can reach — either on the same machine, or on another machine on your network (I use tailscale and an old gaming PC)
-* A model that supports tool calling. Recommended: `qwen2.5-coder:7b` — see [Model notes](#model-notes)
+* A model that supports tool calling. Recommended: `qwen2.5-coder:7b` or `llama3.1` both have been used with MetCode: see [Model notes](#model-notes)
 
 ### 1. Install
 ```bash
@@ -155,6 +174,7 @@ Models can make mistakes, here are guardrails to minimize damage.
 * **You Approve Every Change** Edits display a diff and commands show before running/editing
 * **Protected Files** A list of protected files
 * **Limits on Runaway Loops** A single turn stops after a fixed number of tool-call rounds, or after repeated failing tool calls
+* **Toleerant of Malformed Tools** If a model returns a tool call as text or in an unexpected format, MetCode properly detecs and runs it, unless it is an unknown tool which is never executed.
 
 Use your discretion it will run any command you approve it. And the path is not restricted to the project directory it is free to go into sub directories.
 
@@ -183,7 +203,7 @@ go test ./...
 Tests don't need a running Ollama server; the model API is faked with `httptest`.
 
 ## Known limitations
-- Small/local models hallucinate tools or produce malformed tool calls
+- Metcode recovers from small models hallucinating tool calls or producing malformed tool calls. However we are not perfect and errors may still occur.
 - Only the first tool call per assistant message is executed; extras are dropped
 - Creating a file uses `edit_file` with and empty old_text. An existing file is only changed when old_text matches exactly once, so a normal edit never truncates it.
 - An edit rewrites the whole file after you confirm, so changes made to the file while the confirmation is pending are overwritten.
