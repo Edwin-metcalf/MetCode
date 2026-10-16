@@ -2,6 +2,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -109,6 +110,73 @@ func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error
 
 }
 
+type rawCall struct {
+	Name       string         `json:"name"`
+	Arguments  map[string]any `json:"arguments"`
+	Parameters map[string]any `json:"parameters"`
+	Function   *struct {
+		Name       string         `json:"name"`
+		Arguments  map[string]any `json:"arguments"`
+		Parameters map[string]any `json:"parameters"`
+	} `json:"function"`
+}
+
+func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
+	//right now only four cases but might have more possibly expand to more helpers in that case
+	//future case if the user is actually asking for a json that hs {"name": "example"} it will try to tool call it
+
+	if len(m.ToolCalls) > 0 {
+		return m
+	}
+
+	stripped := strings.TrimSpace(m.Content)
+
+	if strings.HasPrefix(stripped, "<tool_call>") {
+		noTagString := strings.TrimPrefix(stripped, "<tool_call>")
+		noTagString = strings.TrimSuffix(noTagString, "</tool_call>")
+		noTagString = strings.TrimSpace(noTagString)
+
+		noPrefixMessage := ollama.Message{Role: m.Role, Content: noTagString, ToolCalls: m.ToolCalls}
+		return a.normalizeMessage(noPrefixMessage)
+	}
+
+	if !strings.HasPrefix(stripped, "{") {
+		return m
+	}
+
+	var rawData rawCall
+
+	err := json.Unmarshal([]byte(stripped), &rawData)
+
+	if err != nil {
+		fmt.Printf("error unmarshaling tool call: %v\n", err)
+		return m
+	}
+	name, args := "", map[string]any(nil)
+
+	if rawData.Function != nil {
+		name = rawData.Function.Name
+		args = rawData.Function.Arguments
+		if args == nil {
+			args = rawData.Function.Parameters
+		}
+	} else {
+		name = rawData.Name
+		args = rawData.Arguments
+
+		if args == nil {
+			args = rawData.Parameters
+		}
+	}
+
+	if name == "" {
+		return m
+	}
+
+	return ollama.Message{Role: m.Role, Content: "", ToolCalls: []ollama.ToolCall{{Function: ollama.CalledFunction{Name: name, Arguments: args}}}}
+
+}
+
 func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *TurnStats) (string, error) {
 	//turns user input to history and runs the model tool loop until we have an anser without a tool call
 
@@ -123,6 +191,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 	logCall(stats, resp)
 
 	resp.Message = firstCallOnly(resp.Message)
+	resp.Message = a.normalizeMessage(resp.Message)
 	*history = append(*history, resp.Message)
 
 	failRounds := 0
@@ -158,8 +227,10 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 		if err != nil {
 			return "", err
 		}
+
 		logCall(stats, resp)
 		resp.Message = firstCallOnly(resp.Message)
+		resp.Message = a.normalizeMessage(resp.Message)
 		*history = append(*history, resp.Message)
 	}
 	return resp.Message.Content, nil
