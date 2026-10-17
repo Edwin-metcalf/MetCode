@@ -186,6 +186,58 @@ func TestNormalizeMessage(t *testing.T) {
 			wantArgs: map[string]any{},
 		},
 		{
+			// qwen2.5-coder wraps the call in a json-tagged markdown fence
+			name:     "fenced with json tag",
+			content:  "```json\n{\"name\": \"run_command\", \"arguments\": {\"command\": \"cat\", \"arguments\": [\"job.go\"]}}\n```",
+			wantCall: true,
+			wantName: "run_command",
+			wantArgs: map[string]any{"command": "cat", "arguments": []any{"job.go"}},
+		},
+		{
+			// a bare fence with no language tag
+			name:     "fenced bare",
+			content:  "```\n{\"name\":\"edit_file\",\"arguments\":{\"path\":\"a.go\"}}\n```",
+			wantCall: true,
+			wantName: "edit_file",
+			wantArgs: map[string]any{"path": "a.go"},
+		},
+		{
+			// a json5 tag is still a fence
+			name:     "fenced with json5 tag",
+			content:  "```json5\n{\"name\":\"edit_file\",\"arguments\":{\"path\":\"a.go\"}}\n```",
+			wantCall: true,
+			wantName: "edit_file",
+			wantArgs: map[string]any{"path": "a.go"},
+		},
+		{
+			// the fence wrapped around the whole tool_call block
+			name:     "fenced around tool_call tags",
+			content:  "```json\n<tool_call>\n{\"name\":\"edit_file\",\"arguments\":{\"path\":\"a.go\"}}\n</tool_call>\n```",
+			wantCall: true,
+			wantName: "edit_file",
+			wantArgs: map[string]any{"path": "a.go"},
+		},
+		{
+			// the fence inside the tool_call tags
+			name:     "fenced inside tool_call tags",
+			content:  "<tool_call>\n```json\n{\"name\":\"edit_file\",\"arguments\":{\"path\":\"a.go\"}}\n```\n</tool_call>",
+			wantCall: true,
+			wantName: "edit_file",
+			wantArgs: map[string]any{"path": "a.go"},
+		},
+		{
+			// a fenced block that is valid JSON but not a tool call stays put
+			name:     "fenced json that is not a call",
+			content:  "```json\n{\"foo\": 1}\n```",
+			wantCall: false,
+		},
+		{
+			// prose with a fenced code sample must pass through untouched
+			name:     "prose with fenced code is not a call",
+			content:  "Here is the file:\n```go\nfunc main() {}\n```",
+			wantCall: false,
+		},
+		{
 			// plain prose must pass through untouched
 			name:     "prose is not a call",
 			content:  "hello there, how can I help?",
@@ -277,6 +329,7 @@ func TestTurn_SalvagesToolCallFromContent(t *testing.T) {
 		{"flat arguments", `{"name":"read_file","arguments":{"path":"hi.txt"}}`},
 		{"flat parameters", `{"name":"read_file","parameters":{"path":"hi.txt"}}`},
 		{"nested function", `{"function":{"name":"read_file","arguments":{"path":"hi.txt"}}}`},
+		{"fenced json", "```json\n{\"name\":\"read_file\",\"arguments\":{\"path\":\"hi.txt\"}}\n```"},
 		{"tool_call tags", `<tool_call>
 {"name":"read_file","arguments":{"path":"hi.txt"}}
 </tool_call>`},
