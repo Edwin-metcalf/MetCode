@@ -47,10 +47,7 @@ func runCommandHelper(call *ollama.ToolCall, root string) ollama.Message {
 	fmt.Println("------------------------------")
 	fmt.Println("Run this command? (y/n)")
 
-	var response string
-	fmt.Scanln(&response)
-
-	if strings.ToLower(strings.TrimSpace(response)) != "y" {
+	if !readConfirmAnswer() {
 		return ollama.Message{Role: "tool", Content: "command canceled by user"}
 	}
 	cmd := exec.Command(command, arguments...)
