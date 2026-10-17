@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"log"
 	"os"
+	"slices"
 
 	"github.com/Edwin-metcalf/MetCode/internal/agent"
 	"github.com/Edwin-metcalf/MetCode/internal/prompt"
@@ -10,7 +13,26 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// version is set at build time with:
+//
+//	go build -ldflags "-X main.version=v0.1.0" ./cmd/metcode
+var version = "dev"
+
+// wantsVersion reports whether --version or -v was passed.
+func wantsVersion(args []string) bool {
+	return slices.Contains(args, "--version") || slices.Contains(args, "-v")
+}
+
+func printVersion(w io.Writer) {
+	fmt.Fprintln(w, version)
+}
+
 func main() {
+	if wantsVersion(os.Args[1:]) {
+		printVersion(os.Stdout)
+		return
+	}
+
 	if err := godotenv.Load(); err != nil {
 		log.Println("no .env file found, using default local host")
 	}
