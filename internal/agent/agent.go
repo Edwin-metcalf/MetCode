@@ -129,7 +129,7 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 		return m
 	}
 
-	stripped := strings.TrimSpace(m.Content)
+	stripped := stripCodeFence(strings.TrimSpace(m.Content))
 
 	if strings.HasPrefix(stripped, "<tool_call>") {
 		noTagString := strings.TrimPrefix(stripped, "<tool_call>")
@@ -175,6 +175,22 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 
 	return ollama.Message{Role: m.Role, Content: "", ToolCalls: []ollama.ToolCall{{Function: ollama.CalledFunction{Name: name, Arguments: args}}}}
 
+}
+
+// stripCodeFence removes a markdown code fence wrapped around content: the
+// opening line (``` plus an optional language tag such as json) and a closing
+// ``` line. Content that does not start with a fence is returned unchanged.
+func stripCodeFence(s string) string {
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	i := strings.IndexByte(s, '\n')
+	if i < 0 {
+		return s
+	}
+	s = strings.TrimSpace(s[i+1:])
+	s = strings.TrimSuffix(s, "```")
+	return strings.TrimSpace(s)
 }
 
 func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *TurnStats) (string, error) {
