@@ -127,10 +127,7 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	fmt.Println("------------------------------")
 	fmt.Println("apply this edit? (y/n)")
 
-	var response string
-	fmt.Scanln(&response)
-
-	if strings.ToLower(strings.TrimSpace(response)) != "y" {
+	if !readConfirmAnswer() {
 		return ollama.Message{Role: "tool", Content: "Edit canceled by user"}
 	}
 
@@ -148,10 +145,7 @@ func createFileHelper(path string, newText string) ollama.Message {
 	fmt.Println("------------------------------")
 	fmt.Println("apply this edit? (y/n)")
 
-	var response string
-	fmt.Scanln(&response)
-
-	if strings.ToLower(strings.TrimSpace(response)) != "y" {
+	if !readConfirmAnswer() {
 		return ollama.Message{Role: "tool", Content: "Edit canceled by user"}
 	}
 
