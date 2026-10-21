@@ -154,7 +154,7 @@ func (c *CLI) handleCompact(history *[]ollama.Message) (*[]ollama.Message, error
 		return nil, err
 	}
 
-	compactedMessage := ollama.Message{Role: "system", Content: compactedString, ToolCalls: []ollama.ToolCall{}}
+	compactedMessage := ollama.Message{Role: "user", Content: compactedString, ToolCalls: []ollama.ToolCall{}}
 
 	newHistory := []ollama.Message{c.SystemPrompt, compactedMessage}
 	fmt.Println("compacted!")

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -44,6 +45,10 @@ type TurnStats struct {
 	WallTime     time.Duration
 }
 
+// constants for communication with the model
+const temperature = 0.2
+const numCTX = 4096
+
 func addStats(s *TurnStats, r ollama.ChatResponse) {
 	s.PromptTokens += r.PromptEvalCount
 	s.OutputTokens += r.EvalCount
@@ -75,9 +80,23 @@ func BuildChatRequest(history []ollama.Message, model string) ollama.ChatRequest
 	outgoing.Messages = history
 	outgoing.Model = model
 	outgoing.Stream = false
-	outgoing.Options.Temperature = 0.2
-	outgoing.Options.NumCtx = 4096
+	outgoing.Options.Temperature = temperature
+	outgoing.Options.NumCtx = numCTX
 	outgoing.Tools = tools.All
+
+	return outgoing
+}
+
+// used for compact right now but could be for others, by not including any tool definitions we lower our context by like 600
+func BuildChatRequestNoTools(history []ollama.Message, model string) ollama.ChatRequest {
+	var outgoing ollama.ChatRequest
+
+	outgoing.Messages = history
+	outgoing.Model = model
+	outgoing.Stream = false
+	outgoing.Options.Temperature = temperature
+	outgoing.Options.NumCtx = numCTX
+	outgoing.Tools = []ollama.Tool{}
 
 	return outgoing
 }
@@ -89,13 +108,18 @@ func firstCallOnly(m ollama.Message) ollama.Message {
 	return m
 }
 
-func (a *Agent) chat(history []ollama.Message) (ollama.ChatResponse, error) {
+// noToolsFlag should be true if you do not want to include tools on the call
+func (a *Agent) chat(history []ollama.Message, noToolsFlag bool) (ollama.ChatResponse, error) {
 	if a.Wait != nil {
 		stop := a.Wait()
 		defer stop()
 	}
+	if noToolsFlag {
+		return ollama.Chat(BuildChatRequestNoTools(history, a.Model), a.Host)
+	}
 	return ollama.Chat(BuildChatRequest(history, a.Model), a.Host)
 }
+
 func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error) {
 	start := time.Now()
 	var stats TurnStats
@@ -123,31 +147,34 @@ type rawCall struct {
 
 // function desgined to take a ollama.message slice and return a string of its conent summarized
 func (a *Agent) CompactHistory(history *[]ollama.Message) (string, error) {
-	summarizePrompt := ` Summarize the conversation history into a single message that captures the key points and context.
-	The summary should be concise, clear, and maintain the original meaning of the conversation. Cut conversational language and unnessary content.
-	keep key things like file paths, function/class names , decisions made, current task state, errors ecnountered, what was acomplished. 
-	Do not summarize the system prompt or this message. Return only plain text.
+	summarizePrompt := `Summarize the conversation above so it can replace the full history. 
+		Keep: file paths, function/class names, decisions made, current task state, errors encountered, what was accomplished.
+		Drop: greetings and conversational filler. 
+		Respond with the summary only, as plain text. Do not call tools.
+
 	`
-	summarizeMessage := ollama.Message{Role: "assistant", Content: summarizePrompt, ToolCalls: []ollama.ToolCall{}}
-	historyPlus := append(*history, summarizeMessage)
+	summarizeMessage := ollama.Message{Role: "user", Content: summarizePrompt, ToolCalls: []ollama.ToolCall{}}
+	historyPlus := append(slices.Clone(*history), summarizeMessage)
 
-	//TODO this sucks up tokens and context write a build chat request that does a call without tools definitions
-	chatRequest := BuildChatRequest(historyPlus, a.Model)
-
-	chatResponse, err := ollama.Chat(chatRequest, a.Host)
+	//summarize everything but system prompt dont need that
+	chatResponse, err := a.chat(historyPlus[1:], true)
 	if err != nil {
 		return "", err
 	}
-	summarizedMessage := chatResponse.Message.Content
+
+	summarizedMessage := strings.TrimSpace(chatResponse.Message.Content)
 	if summarizedMessage == "" {
-		return "", fmt.Errorf("Error summary is empty")
+		fmt.Println("summary was empty")
+		return "", fmt.Errorf("error: summary is empty")
 	}
+
 	return summarizedMessage, nil
 }
 
 func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 	//right now only four cases but might have more possibly expand to more helpers in that case
 	//future case if the user is actually asking for a json that hs {"name": "example"} it will try to tool call it
+	//new hase ```json just saw
 
 	if len(m.ToolCalls) > 0 {
 		return m
@@ -222,7 +249,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 
 	*history = append(*history, ollama.Message{Role: "user", Content: userInput})
 
-	resp, err := a.chat(*history)
+	resp, err := a.chat(*history, false)
 	if err != nil {
 		//dont add empty
 		*history = (*history)[:len(*history)-1]
@@ -263,7 +290,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 			return "", ErrTooManyFailures
 		}
 
-		resp, err = a.chat(*history)
+		resp, err = a.chat(*history, false)
 		if err != nil {
 			return "", err
 		}

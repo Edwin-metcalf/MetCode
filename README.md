@@ -68,6 +68,9 @@ Steps this project has taken to optimize small model performance:
 
 - Recovering tool calls small models write as plain text or in malformed ways
 - Compact tool definitions (folded file_creation into edit_file, saving a model round trip and context tokens)
+- Unique chat response builder that leaves out tool definitons when not needed to save context
+    - Used at times like /compact that do not need the tool definitions
+
 
 The project is currently working toward:
 
@@ -211,6 +214,7 @@ Type any of these at the prompt (not sent to the model):
 | `/save`         | Saves the current conversation. Prompts for a name the first time; reuses it after that |
 | `/load`         | Lists saved conversations and lets you pick one to resume                               |
 | `/clear`        | Clears the current conversation, keeping only the system prompt                         |
+| `/compact`      | Compacts the current converstation                                                      |
 
 ---
 
