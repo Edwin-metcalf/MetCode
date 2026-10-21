@@ -121,22 +121,27 @@ type rawCall struct {
 	} `json:"function"`
 }
 
+// function desgined to take a ollama.message slice and return a string of its conent summarized
 func (a *Agent) CompactHistory(history *[]ollama.Message) (string, error) {
 	summarizePrompt := ` Summarize the conversation history into a single message that captures the key points and context.
 	The summary should be concise, clear, and maintain the original meaning of the conversation. Cut conversational language and unnessary content.
-	keep key things like file location, important code, and other key information to the conversation. Do not summarize the system prompt or this message.
-	Return only plain text.
+	keep key things like file paths, function/class names , decisions made, current task state, errors ecnountered, what was acomplished. 
+	Do not summarize the system prompt or this message. Return only plain text.
 	`
-	summarizeMessage := ollama.Message{Role: "system", Content: summarizePrompt, ToolCalls: []ollama.ToolCall{}}
-	*history = append(*history, summarizeMessage)
+	summarizeMessage := ollama.Message{Role: "assistant", Content: summarizePrompt, ToolCalls: []ollama.ToolCall{}}
+	historyPlus := append(*history, summarizeMessage)
 
-	chatRequest := BuildChatRequest(*history, a.Model)
+	//TODO this sucks up tokens and context write a build chat request that does a call without tools definitions
+	chatRequest := BuildChatRequest(historyPlus, a.Model)
 
 	chatResponse, err := ollama.Chat(chatRequest, a.Host)
 	if err != nil {
 		return "", err
 	}
 	summarizedMessage := chatResponse.Message.Content
+	if summarizedMessage == "" {
+		return "", fmt.Errorf("Error summary is empty")
+	}
 	return summarizedMessage, nil
 }
 
