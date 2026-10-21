@@ -121,6 +121,25 @@ type rawCall struct {
 	} `json:"function"`
 }
 
+func (a *Agent) CompactHistory(history *[]ollama.Message) (string, error) {
+	summarizePrompt := ` Summarize the conversation history into a single message that captures the key points and context.
+	The summary should be concise, clear, and maintain the original meaning of the conversation. Cut conversational language and unnessary content.
+	keep key things like file location, important code, and other key information to the conversation. Do not summarize the system prompt or this message.
+	Return only plain text.
+	`
+	summarizeMessage := ollama.Message{Role: "system", Content: summarizePrompt, ToolCalls: []ollama.ToolCall{}}
+	*history = append(*history, summarizeMessage)
+
+	chatRequest := BuildChatRequest(*history, a.Model)
+
+	chatResponse, err := ollama.Chat(chatRequest, a.Host)
+	if err != nil {
+		return "", err
+	}
+	summarizedMessage := chatResponse.Message.Content
+	return summarizedMessage, nil
+}
+
 func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 	//right now only four cases but might have more possibly expand to more helpers in that case
 	//future case if the user is actually asking for a json that hs {"name": "example"} it will try to tool call it

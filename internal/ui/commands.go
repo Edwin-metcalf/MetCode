@@ -31,7 +31,13 @@ func (c *CLI) handleCommand(command string, history *[]ollama.Message) {
 		*history = []ollama.Message{c.SystemPrompt}
 		c.Agent.Plan = nil
 		fmt.Println("conversation history cleared")
+	case "/compact":
+		compacted, err := c.handleCompact(history)
+		if err != nil {
+			fmt.Println("error compacting:", err)
+		}
 
+		*history = *compacted
 	case "/help":
 		fmt.Println(`Available Commands
 	- /help - Displays help menu
@@ -137,4 +143,17 @@ func (c *CLI) handleSave(history *[]ollama.Message) error {
 	c.Conversation = saved
 	fmt.Println("saved conversation as", saved)
 	return nil
+}
+
+func (c *CLI) handleCompact(history *[]ollama.Message) (*[]ollama.Message, error) {
+	compactedString, err := c.Agent.CompactHistory(history)
+	if err != nil {
+		return nil, err
+	}
+
+	compactedMessage := ollama.Message{Role: "system", Content: compactedString, ToolCalls: []ollama.ToolCall{}}
+
+	newHistory := []ollama.Message{c.SystemPrompt, compactedMessage}
+
+	return &newHistory, nil
 }
