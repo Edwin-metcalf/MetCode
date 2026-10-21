@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"runtime/debug"
 	"slices"
 
 	"github.com/Edwin-metcalf/MetCode/internal/agent"
@@ -23,8 +24,21 @@ func wantsVersion(args []string) bool {
 	return slices.Contains(args, "--version") || slices.Contains(args, "-v")
 }
 
+// Resolve Version prefers the ldflags-stamped verison, then the module version
+// version Go embeds for go install ...@vX.Y.Z, if those are not there defaults to "dev"
+func resolveVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return version
+}
 func printVersion(w io.Writer) {
-	fmt.Fprintln(w, version)
+	fmt.Fprintln(w, resolveVersion())
 }
 
 func main() {
@@ -44,7 +58,7 @@ func main() {
 
 	workingDir, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("failed to get working directory")
+		log.Fatalf("failed to get working directory: %v", err)
 	}
 
 	home, err := os.UserHomeDir()
