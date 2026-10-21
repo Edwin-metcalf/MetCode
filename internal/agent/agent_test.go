@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
 )
@@ -440,5 +441,193 @@ func TestTurn_PlainProseIsNotSalvaged(t *testing.T) {
 	}
 	if len(history[1].ToolCalls) != 0 {
 		t.Errorf("assistant message has %d tool calls, want 0", len(history[1].ToolCalls))
+	}
+}
+
+// ---- compaction ----
+
+// captureOllama replies with the given summary and records the request it
+// received, so tests can inspect what CompactHistory actually sent.
+func captureOllama(t *testing.T, summary string, got *ollama.ChatRequest) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(got); err != nil {
+			t.Errorf("bad request body: %v", err)
+		}
+		json.NewEncoder(w).Encode(ollama.ChatResponse{
+			Message: ollama.Message{Role: "assistant", Content: summary},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func TestTrimMiddle_ShortUnchanged(t *testing.T) {
+	s := strings.Repeat("a", maxToolText)
+	if got := trimMiddle(s); got != s {
+		t.Fatalf("text at the threshold should pass through unchanged")
+	}
+}
+
+func TestTrimMiddle_LongKeepsEnds(t *testing.T) {
+	s := "START" + strings.Repeat("x", 3000) + "END"
+	got := trimMiddle(s)
+
+	if len(got) >= len(s) {
+		t.Fatalf("output (%d) should be shorter than input (%d)", len(got), len(s))
+	}
+	if !strings.HasPrefix(got, "START") || !strings.HasSuffix(got, "END") {
+		t.Fatalf("head and tail should survive, got %q...%q", got[:10], got[len(got)-10:])
+	}
+	if !strings.Contains(got, "[truncated]") {
+		t.Fatalf("missing truncation marker")
+	}
+}
+
+func TestTrimMiddle_NeverGrowsJustOverThreshold(t *testing.T) {
+	s := strings.Repeat("a", maxToolText+1)
+	if got := trimMiddle(s); len(got) > len(s) {
+		t.Fatalf("output (%d) grew past input (%d)", len(got), len(s))
+	}
+}
+
+func TestTrimMiddle_DoesNotSplitRunes(t *testing.T) {
+	// the leading "a" shifts every "é" onto odd byte offsets, so the raw
+	// cut at byte 400 lands in the middle of a character
+	s := "a" + strings.Repeat("é", 600)
+	got := trimMiddle(s)
+	if !utf8.ValidString(got) {
+		t.Fatalf("result is not valid UTF-8: a character was split")
+	}
+}
+
+func TestTranscript(t *testing.T) {
+	history := []ollama.Message{
+		{Role: "system", Content: "SECRET SYSTEM PROMPT"},
+		{Role: "user", Content: "what does agent.go do?"},
+		{Role: "assistant", ToolCalls: []ollama.ToolCall{{
+			Function: ollama.CalledFunction{
+				Name:      "read_file",
+				Arguments: map[string]any{"path": "internal/agent/agent.go"},
+			},
+		}}},
+		{Role: "tool", Content: "package agent"},
+		{Role: "assistant", Content: "It runs the tool loop."},
+	}
+	got := transcript(history)
+
+	if strings.Contains(got, "SECRET SYSTEM PROMPT") {
+		t.Errorf("system prompt should be skipped")
+	}
+	for _, want := range []string{
+		"USER: what does agent.go do?",
+		"TOOL CALL: read_file",
+		"internal/agent/agent.go", // the path must survive
+		"TOOL RESULT: package agent",
+		"ASSISTANT: It runs the tool loop.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("transcript missing %q\n--- got ---\n%s", want, got)
+		}
+	}
+	// the tool-call-only assistant message has no text, so no blank label
+	if strings.Contains(got, "ASSISTANT: \n") {
+		t.Errorf("empty assistant content should not produce a blank line")
+	}
+}
+
+func TestTranscript_TrimsLongToolResult(t *testing.T) {
+	big := "HEAD" + strings.Repeat("x", 5000) + "TAIL"
+	got := transcript([]ollama.Message{{Role: "tool", Content: big}})
+
+	if len(got) > 1000 {
+		t.Errorf("tool result not trimmed, transcript is %d bytes", len(got))
+	}
+	if !strings.Contains(got, "HEAD") || !strings.Contains(got, "TAIL") {
+		t.Errorf("head and tail of the tool result should be kept")
+	}
+}
+
+func TestCompactHistory_RequestShape(t *testing.T) {
+	var req ollama.ChatRequest
+	host := captureOllama(t, "the summary", &req)
+	a := &Agent{Model: "test", Host: host}
+
+	history := []ollama.Message{
+		{Role: "system", Content: "SECRET SYSTEM PROMPT"},
+		{Role: "user", Content: "read my file"},
+		{Role: "assistant", ToolCalls: []ollama.ToolCall{{
+			Function: ollama.CalledFunction{
+				Name:      "read_file",
+				Arguments: map[string]any{"path": "main.go"},
+			},
+		}}},
+		{Role: "tool", Content: "package main"},
+	}
+
+	summary, err := a.CompactHistory(&history)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if summary != "the summary" {
+		t.Errorf("got summary %q", summary)
+	}
+
+	// one flat user message, never an assistant message (the original bug)
+	if len(req.Messages) != 1 || req.Messages[0].Role != "user" {
+		t.Fatalf("want exactly one user message, got %+v", req.Messages)
+	}
+	// no tool definitions on the compaction call
+	if len(req.Tools) != 0 {
+		t.Errorf("compaction call should send no tools, got %d", len(req.Tools))
+	}
+
+	content := req.Messages[0].Content
+	if strings.Contains(content, "SECRET SYSTEM PROMPT") {
+		t.Errorf("system prompt should not be summarized")
+	}
+	if !strings.Contains(content, "main.go") {
+		t.Errorf("file path from the tool call should reach the model")
+	}
+
+	// the instruction must come after the transcript
+	end := strings.Index(content, "</conversation>")
+	if end < 0 {
+		t.Fatalf("transcript should be wrapped in <conversation> tags")
+	}
+	if !strings.Contains(strings.ToLower(content[end:]), "summar") {
+		t.Errorf("instruction should come after the transcript, got tail %q", content[end:])
+	}
+}
+
+func TestCompactHistory_DoesNotMutateHistory(t *testing.T) {
+	var req ollama.ChatRequest
+	host := captureOllama(t, "the summary", &req)
+	a := &Agent{Model: "test", Host: host}
+
+	history := make([]ollama.Message, 2, 10) // spare capacity on purpose
+	history[0] = ollama.Message{Role: "system", Content: "sys"}
+	history[1] = ollama.Message{Role: "user", Content: "hi"}
+
+	if _, err := a.CompactHistory(&history); err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 2 {
+		t.Errorf("history length changed to %d", len(history))
+	}
+	if extra := history[:3][2]; extra.Content != "" || extra.Role != "" {
+		t.Errorf("compaction wrote into the history's backing array: %+v", extra)
+	}
+}
+
+func TestCompactHistory_EmptySummaryIsError(t *testing.T) {
+	host := fakeOllama(t, ollama.ChatResponse{
+		Message: ollama.Message{Role: "assistant", Content: ""},
+	})
+	a := &Agent{Model: "test", Host: host}
+
+	history := []ollama.Message{{Role: "user", Content: "hi"}}
+	if _, err := a.CompactHistory(&history); err == nil {
+		t.Fatalf("an empty summary should return an error")
 	}
 }

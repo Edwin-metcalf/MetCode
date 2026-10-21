@@ -58,6 +58,7 @@ It provides an interactive interface for working with local LLMs and having your
 - **Confirmation Before Changes** Every edit and command execution shows a diff and only completes after user input
 - **Planning** for multi step tasks the model can write and update a plan as it works
 - **Customizable system Prompt** edit '~/.metcode/system_prompt.md' to change Metcodes behavior across all projects
+- **Smart Compaction** `/compact` summarizes long conversations to free up context, built to keep file paths, decisions, and errors even with a small context window
 - **Conversation Saving and Loading** to pick up where you left off
 
 ## The Small Model Project
@@ -68,6 +69,9 @@ Steps this project has taken to optimize small model performance:
 
 - Recovering tool calls small models write as plain text or in malformed ways
 - Compact tool definitions (folded file_creation into edit_file, saving a model round trip and context tokens)
+- Context-aware compaction: history is flattened into a plain-text transcript and summarized in a single call. Built so Tool calls, file paths, and important information are visible regardless of chat template
+    - Long tool results are trimmed to their head and tail (errors and file starts survive), and call arguments if re-read is needed
+
 
 The project is currently working toward:
 
@@ -211,6 +215,7 @@ Type any of these at the prompt (not sent to the model):
 | `/save`         | Saves the current conversation. Prompts for a name the first time; reuses it after that |
 | `/load`         | Lists saved conversations and lets you pick one to resume                               |
 | `/clear`        | Clears the current conversation, keeping only the system prompt                         |
+| `/compact`      | Summarizes the conversation to free up context (keeps file paths, decisions, errors)    |
 
 ---
 
@@ -257,6 +262,7 @@ Tests don't need a running Ollama server; the model API is faked with `httptest`
 - An edit rewrites the whole file after you confirm, so changes made to the file while the confirmation is pending are overwritten.
 - `run_command` and file tools are jailed to the launch directory; absolute command paths are rejected
 - Editing the repo's `system_prompt.md` won't affect users who already ran MetCode once
+- `/compact` only shows the summarizer the start and end of long tool results, so details from the middle of a large file are lost unless the model mentioned them(In the response to the user). File paths are kept, so the model can re-read the file if needed
 
 ## Contributing
 

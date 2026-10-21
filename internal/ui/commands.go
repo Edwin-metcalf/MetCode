@@ -31,14 +31,22 @@ func (c *CLI) handleCommand(command string, history *[]ollama.Message) {
 		*history = []ollama.Message{c.SystemPrompt}
 		c.Agent.Plan = nil
 		fmt.Println("conversation history cleared")
+	case "/compact":
+		compacted, err := c.handleCompact(history)
+		if err != nil {
+			fmt.Println("error compacting:", err)
+			return
+		}
+		*history = *compacted
 
 	case "/help":
 		fmt.Println(`Available Commands
 	- /help - Displays help menu
 	- /change-model - Changes the model your using
-	- /save - Save the current conversation to a new conversation or an old one
-	- /load - Load a past conversation
 	- /clear - clears the history of the conversation back to the system prompt, and the current plan
+	- /compact - compacts the current conversation into a smaller summary
+	- /load - Load a past conversation
+	- /save - Save the current conversation to a new conversation or an old one
 			`)
 	default:
 		fmt.Println("That is not a command I currently have try /help")
@@ -137,4 +145,19 @@ func (c *CLI) handleSave(history *[]ollama.Message) error {
 	c.Conversation = saved
 	fmt.Println("saved conversation as", saved)
 	return nil
+}
+
+func (c *CLI) handleCompact(history *[]ollama.Message) (*[]ollama.Message, error) {
+	fmt.Println("compacting please wait")
+	compactedString, err := c.Agent.CompactHistory(history)
+	if err != nil {
+		return nil, err
+	}
+
+	compactedMessage := ollama.Message{Role: "user", Content: compactedString, ToolCalls: []ollama.ToolCall{}}
+
+	newHistory := []ollama.Message{c.SystemPrompt, compactedMessage}
+	fmt.Println("compacted!")
+
+	return &newHistory, nil
 }
