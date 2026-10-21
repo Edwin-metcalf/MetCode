@@ -102,14 +102,16 @@ Weaknesses
 * A model that supports tool calling. Recommended: `qwen2.5-coder:7b` or `llama3.1` both have been used with MetCode: see [Model notes](#model-notes)
 
 ### 1. Install
+Install from latest release:
+```bash 
+go install github.com/Edwin-metcalf/MetCode/cmd/metcode@latest
+```
+Or build from source
+
 ```bash
 git clone https://github.com/Edwin-metcalf/MetCode
 cd MetCode
 go install ./cmd/metcode
-```
-Or if you have go installed:
-```bash 
-go install github.com/Edwin-metcalf/MetCode/cmd/metcode@latest
 ```
 
 This should build the MetCode binary and install it into GOPATH (good to check if the go bin directory is in you 'PATH' run echo $PATH to check)

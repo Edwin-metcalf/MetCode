@@ -24,8 +24,8 @@ func wantsVersion(args []string) bool {
 	return slices.Contains(args, "--version") || slices.Contains(args, "-v")
 }
 
-// More complex version of print Version as Resolve Version tye the ldflags-stamped verison
-// version Go embeds for go install @vX.Y.Z
+// Resolve Version prefers the ldflags-stamped verison, then the module version
+// version Go embeds for go install ...@vX.Y.Z, if those are not there defaults to "dev"
 func resolveVersion() string {
 	if version != "dev" {
 		return version
@@ -58,7 +58,7 @@ func main() {
 
 	workingDir, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("failed to get working directory")
+		log.Fatalf("failed to get working directory: %v", err)
 	}
 
 	home, err := os.UserHomeDir()
