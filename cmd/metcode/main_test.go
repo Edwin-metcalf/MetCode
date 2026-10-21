@@ -27,7 +27,7 @@ func TestWantsVersion(t *testing.T) {
 func TestPrintVersion(t *testing.T) {
 	var buf bytes.Buffer
 	printVersion(&buf)
-	if got, want := buf.String(), version+"\n"; got != want {
+	if got, want := buf.String(), resolveVersion()+"\n"; got != want {
 		t.Errorf("printVersion wrote %q, want %q", got, want)
 	}
 }
