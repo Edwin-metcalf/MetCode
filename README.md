@@ -114,6 +114,11 @@ go install github.com/Edwin-metcalf/MetCode/cmd/metcode@latest
 
 This should build the MetCode binary and install it into GOPATH (good to check if the go bin directory is in you 'PATH' run echo $PATH to check)
 
+Run `metcode --version` (or `-v`) to print the version and exit. A plain `go build` prints `dev`; to stamp a version, pass it at build time:
+```bash
+go build -ldflags "-X main.version=v0.1.0" -o metcode ./cmd/metcode
+```
+
 ### 2. Connect MetCode to Ollama server
 If you are running Ollama on the same machine you want to use MetCode on, skip this (the default is http://localhost:11434)
 
