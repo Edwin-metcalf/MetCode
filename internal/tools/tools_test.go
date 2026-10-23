@@ -405,10 +405,11 @@ func TestEditFileHelper_RejectsBadOldText(t *testing.T) {
 
 func TestRunCommandHelper_RejectsPathEscapingRoot(t *testing.T) {
 	cases := map[string]string{
-		"parent escape": "../outside",
-		"absolute path": "/etc",
-		"interior dots": "a/../../etc",
-		"nested escape": "sub/../../secrets",
+		"parent escape":    "../outside",
+		"absolute path":    "/etc",
+		"rooted backslash": `\etc`,
+		"interior dots":    "a/../../etc",
+		"nested escape":    "sub/../../secrets",
 	}
 
 	for name, path := range cases {
