@@ -86,7 +86,7 @@ With a long term goal of how much can design make up for model size?
 ## Model notes
 
 Model choice affects MetCode more than any prompt or tool tweak measured so far. The two models used most with MetCode in development are
-qwqn2.5-coder:7b and llama3.1:latest. Both run on the test machine (Ubuntu GPU: Nvidia 1080) with `num_ctx=4096`.
+qwqn2.5-coder:7b and llama3.1:latest. Both run on the test machine (Ubuntu GPU: Nvidia 1080) with `num_ctx=8192`.
 
 | Model              | Unnecessary tool calls | Calls a tool when asked | Prefill per turn                |
 | ------------------ | ---------------------- | ----------------------- | ------------------------------- |

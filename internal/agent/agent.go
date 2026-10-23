@@ -286,16 +286,29 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 // opening line (``` plus an optional language tag such as json) and a closing
 // ``` line. Content that does not start with a fence is returned unchanged.
 func stripCodeFence(s string) string {
-	if !strings.HasPrefix(s, "```") {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.TrimSpace(s)
+
+	if !strings.HasPrefix(s, "```") && !strings.HasPrefix(s, "~~~") {
 		return s
 	}
-	i := strings.IndexByte(s, '\n')
-	if i < 0 {
+
+	lines := strings.Split(s, "\n")
+
+	if len(lines) <= 1 {
 		return s
 	}
-	s = strings.TrimSpace(s[i+1:])
-	s = strings.TrimSuffix(s, "```")
-	return strings.TrimSpace(s)
+	//drop the opening fence and final fence
+	lines = lines[1:]
+
+	if len(lines) > 0 {
+		last := lines[len(lines)-1]
+		if last == "```" || last == "~~~" || strings.HasPrefix(last, "```") || strings.HasPrefix(last, "~~~") {
+			lines = lines[:len(lines)-1]
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+
 }
 
 func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *TurnStats) (string, error) {
