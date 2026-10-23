@@ -235,7 +235,7 @@ Use your discretion it will run any command you approve it. And the path is not 
 
 ```
 cmd/metcode/          entry point: wires everything together
-internal/agent/       the model <-> tool loop for a single turn
+internal/agent/       the model <-> tool loop, tool-call normalization, and conversation compaction
 internal/ollama/      Ollama API types and HTTP client
 internal/tools/       tool definitions and handlers, path safety
 internal/plan/        plan step types
