@@ -87,7 +87,7 @@ func TestLoadTasks_MalformedJSONNamesTheTask(t *testing.T) {
 func TestNewWorkspace_CopiesFixtureAndIsolatesIt(t *testing.T) {
 	root := t.TempDir()
 	writeFiles(t, root, map[string]string{
-		"demo/task.json":         `{"prompt": "x"}`,
+		"demo/task.json":         `{"prompt": "x", "test_cmd": ["go", "test", "./..."]}`,
 		"demo/files/go.mod":      "module fixture\n\ngo 1.21\n",
 		"demo/files/pkg/util.go": "package pkg\n",
 	})
@@ -137,5 +137,27 @@ func TestNewWorkspace_CopiesFixtureAndIsolatesIt(t *testing.T) {
 	cleanup()
 	if _, err := os.Stat(ws); !os.IsNotExist(err) {
 		t.Errorf("cleanup should remove the workspace, stat err = %v", err)
+	}
+}
+
+func TestLoadTasks_InvalidTaskIsAnError(t *testing.T) {
+	cases := map[string]string{
+		"no prompt":                `{"test_cmd": ["go", "test", "./..."]}`,
+		"no test_cmd and not tool": `{"prompt": "x"}`,
+		"empty test_cmd":           `{"prompt": "x", "test_cmd": []}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFiles(t, root, map[string]string{"bad/task.json": body})
+
+			_, err := LoadTasks(root)
+			if err == nil {
+				t.Fatal("an invalid task should be an error, not silently dropped")
+			}
+			if !strings.Contains(err.Error(), "bad") {
+				t.Errorf("error should name the task, got %q", err)
+			}
+		})
 	}
 }
