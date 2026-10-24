@@ -25,5 +25,4 @@ func runTest(task Task) error {
 
 	<-timer.C
 	return fmt.Errorf("Time out error")
-
 }

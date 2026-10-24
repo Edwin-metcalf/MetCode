@@ -11,6 +11,8 @@ import (
 // needs some proper answer thought right?
 type Task struct {
 	Prompt     string   `json:"prompt"`
+	Name       string   `json:"name"`
+	Dir        string   `json:"dir"`
 	TestCmd    []string `json:"testCmd"`
 	TimeoutSec int      `json:"timeoutSec"`
 	NoTools    bool     `json:"noTools"`
