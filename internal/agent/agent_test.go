@@ -631,3 +631,113 @@ func TestCompactHistory_EmptySummaryIsError(t *testing.T) {
 		t.Fatalf("an empty summary should return an error")
 	}
 }
+
+func TestStripCodeFence(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "prose before the fence",
+			in:   "Sure, I'll create that file:\n```json\n{\"name\":\"edit_file\"}\n```",
+			want: "{\"name\":\"edit_file\"}",
+		},
+		{
+			name: "indented closing fence",
+			in:   "```json\n{\"name\":\"edit_file\"}\n   ```",
+			want: "{\"name\":\"edit_file\"}",
+		},
+		{
+			name: "trailing prose after the fence",
+			in:   "```json\n{\"name\":\"list_directory\",\"arguments\":{}}\n```\nLet me know if you need anything else!",
+			want: "{\"name\":\"list_directory\",\"arguments\":{}}",
+		},
+		{
+			name: "single-line fence",
+			in:   "```json {\"name\":\"list_directory\",\"arguments\":{}} ```",
+			want: "{\"name\":\"list_directory\",\"arguments\":{}}",
+		},
+		{
+			name: "unclosed fence",
+			in:   "```json\n{\"name\":\"edit_file\"}",
+			want: "{\"name\":\"edit_file\"}",
+		},
+		{
+			name: "tilde fence",
+			in:   "~~~json\n{\"a\":1}\n~~~",
+			want: "{\"a\":1}",
+		},
+		{
+			name: "four backticks",
+			in:   "````json\n{\"a\":1}\n````",
+			want: "{\"a\":1}",
+		},
+		{
+			name: "CRLF input",
+			in:   "```json\r\n{\"a\":1}\r\n```",
+			want: "{\"a\":1}",
+		},
+		{
+			name: "no fence passthrough",
+			in:   "plain text",
+			want: "plain text",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stripCodeFence(tt.in); got != tt.want {
+				t.Errorf("stripCodeFence() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeMessage_RecoversFencedCalls(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+		args    map[string]any
+	}{
+		{
+			name:    "prose before the fence",
+			content: "Sure, I'll create that file:\n```json\n{\"name\":\"edit_file\",\"arguments\":{\"path\":\"a.go\"}}\n```",
+			want:    "edit_file",
+			args:    map[string]any{"path": "a.go"},
+		},
+		{
+			name:    "indented closing fence",
+			content: "```json\n{\"name\":\"edit_file\",\"arguments\":{\"path\":\"a.go\"}}\n   ```",
+			want:    "edit_file",
+			args:    map[string]any{"path": "a.go"},
+		},
+		{
+			name:    "trailing prose after the fence",
+			content: "```json\n{\"name\":\"list_directory\",\"arguments\":{}}\n```\nLet me know if you need anything else!",
+			want:    "list_directory",
+			args:    map[string]any{},
+		},
+		{
+			name:    "single-line fence",
+			content: "```json {\"name\":\"list_directory\",\"arguments\":{}} ```",
+			want:    "list_directory",
+			args:    map[string]any{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &Agent{}
+			got := a.normalizeMessage(ollama.Message{Role: "assistant", Content: tt.content})
+			if len(got.ToolCalls) != 1 {
+				t.Fatalf("got %d tool calls, want 1", len(got.ToolCalls))
+			}
+			if got.ToolCalls[0].Function.Name != tt.want {
+				t.Errorf("name = %q, want %q", got.ToolCalls[0].Function.Name, tt.want)
+			}
+			if !reflect.DeepEqual(got.ToolCalls[0].Function.Arguments, tt.args) {
+				t.Errorf("arguments = %#v, want %#v", got.ToolCalls[0].Function.Arguments, tt.args)
+			}
+		})
+	}
+}

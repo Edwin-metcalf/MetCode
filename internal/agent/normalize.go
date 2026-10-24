@@ -83,25 +83,44 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 func stripCodeFence(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.TrimSpace(s)
-
-	if !strings.HasPrefix(s, "```") && !strings.HasPrefix(s, "~~~") {
-		return s
-	}
-
 	lines := strings.Split(s, "\n")
 
-	if len(lines) <= 1 {
+	open := -1
+	marker := ""
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "```") && !strings.HasPrefix(trimmed, "~~~") {
+			continue
+		}
+		open = i
+		marker = trimmed[:3]
+		rest := strings.TrimSpace(strings.TrimPrefix(trimmed, marker))
+		if rest != "" && !strings.HasPrefix(rest, "{") && !strings.HasPrefix(rest, "<") {
+			// Drop the optional language tag on the opening line.
+			if _, after, found := strings.Cut(rest, " "); found {
+				rest = strings.TrimSpace(after)
+			} else {
+				rest = ""
+			}
+		}
+		if strings.HasPrefix(rest, "{") || strings.HasPrefix(rest, "<") {
+			// The fence and its content share one line.
+			if close := strings.Index(rest, marker); close >= 0 {
+				rest = strings.TrimSpace(rest[:close])
+			}
+			return strings.TrimSpace(rest)
+		}
+		break
+	}
+	if open < 0 {
 		return s
 	}
-	//drop the opening fence and final fence
-	lines = lines[1:]
 
-	if len(lines) > 0 {
-		last := lines[len(lines)-1]
-		if last == "```" || last == "~~~" || strings.HasPrefix(last, "```") || strings.HasPrefix(last, "~~~") {
-			lines = lines[:len(lines)-1]
+	for i := open + 1; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), marker) {
+			return strings.TrimSpace(strings.Join(lines[open+1:i], "\n"))
 		}
 	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
-
+	// An unclosed fence still carries the call; take the rest of the message.
+	return strings.TrimSpace(strings.Join(lines[open+1:], "\n"))
 }
