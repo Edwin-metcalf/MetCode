@@ -1,28 +1,52 @@
 package bench
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"time"
 )
 
+const defaultTimeoutSec = 0
+
+type Grade struct {
+	Passed   bool
+	Tampered bool
+	Output   string
+	//add a timed out later maybe
+}
+
 // take a task and a work directory adn run the command in a directory
-func runTest(task Task) error {
-	commandList := task.TestCmd
+func GradeWorkspace(task Task, workspace string) (Grade, error) {
+	var g Grade
 
-	if len(commandList) == 0 {
-		return fmt.Errorf("command list cannot be empty")
-	}
-
-	cmd := exec.Command(commandList[0], commandList[1:]...)
-
-	_, err := cmd.Output()
+	passed, output, err := runTestCmd(task, workspace)
 	if err != nil {
-		return err
+		return Grade{}, err
 	}
-	timer := time.NewTimer(time.Duration(task.TimeoutSec) * time.Second)
-	//something with the output and check if it si right or record or what not.
 
-	<-timer.C
-	return fmt.Errorf("Time out error")
+	g.Passed = passed
+	g.Output = output
+
+	return g, nil
+}
+
+func runTestCmd(t Task, workspace string) (passed bool, output string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, t.TestCmd[0], t.TestCmd[1:]...)
+
+	err = cmd.Run()
+
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			fmt.Println("Command timed out!")
+			return false, "Command Timed out", err
+		}
+		fmt.Printf("Command failed: %v\n", err)
+		return false, "Command failed", err
+	}
+
+	return true, "output", nil
 }
