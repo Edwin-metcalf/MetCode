@@ -53,11 +53,11 @@ func LoadTasks(root string) ([]Task, error) {
 		//validation happens here as well
 
 		if task.Prompt == "" {
-			return nil, fmt.Errorf("task %s: test_cmd is required unless no_tools is true", taskFolder.Name())
+			return nil, fmt.Errorf("task %s: prompt is required", taskFolder.Name())
 		}
 
-		if task.TestCmd == nil && !task.NoTools {
-			continue
+		if len(task.TestCmd) == 0 && !task.NoTools {
+			return nil, fmt.Errorf("task %s: test_cmd is required unless no_tools is true", taskFolder.Name())
 		}
 
 		task.Name = taskFolder.Name()
