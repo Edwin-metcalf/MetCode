@@ -47,7 +47,7 @@ func runCommandHelper(call *ollama.ToolCall, root string) ollama.Message {
 	fmt.Println("------------------------------")
 	fmt.Println("Run this command? (y/n)")
 
-	if !Approve("edit") {
+	if !Approve("command") {
 		return ollama.Message{Role: "tool", Content: "command canceled by user"}
 	}
 	cmd := exec.Command(command, arguments...)

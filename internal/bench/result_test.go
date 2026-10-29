@@ -134,8 +134,8 @@ const (
 var (
 	readAddArgs    = map[string]any{"path": "add.go"}
 	readMissedArgs = map[string]any{"path": "does-not-exist.go"}
-	fixAddArgs     = map[string]any{"path": "add.go", "old_string": "a - b", "new_string": "a + b"}
-	runArgs        = map[string]any{"command": "go test ./..."}
+	fixAddArgs     = map[string]any{"path": "add.go", "old_text": "a - b", "new_text": "a + b"}
+	runArgs        = map[string]any{"command": "go", "arguments": []any{"test", "./..."}}
 )
 
 // ---------- summarize ----------
