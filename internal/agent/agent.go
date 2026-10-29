@@ -45,9 +45,10 @@ type TurnStats struct {
 	WallTime     time.Duration
 }
 
+// exported to bench
 // constants for communication with the model
-const temperature = 0.2
-const numCTX = 8192
+const Temperature = 0.2
+const NumCTX = 8192
 
 func addStats(s *TurnStats, r ollama.ChatResponse) {
 	s.PromptTokens += r.PromptEvalCount
@@ -80,8 +81,8 @@ func BuildChatRequest(history []ollama.Message, model string) ollama.ChatRequest
 	outgoing.Messages = history
 	outgoing.Model = model
 	outgoing.Stream = false
-	outgoing.Options.Temperature = temperature
-	outgoing.Options.NumCtx = numCTX
+	outgoing.Options.Temperature = Temperature
+	outgoing.Options.NumCtx = NumCTX
 	outgoing.Tools = tools.All
 
 	return outgoing
@@ -94,8 +95,8 @@ func BuildChatRequestNoTools(history []ollama.Message, model string) ollama.Chat
 	outgoing.Messages = history
 	outgoing.Model = model
 	outgoing.Stream = false
-	outgoing.Options.Temperature = temperature
-	outgoing.Options.NumCtx = numCTX
+	outgoing.Options.Temperature = Temperature
+	outgoing.Options.NumCtx = NumCTX
 	outgoing.Tools = []ollama.Tool{}
 
 	return outgoing

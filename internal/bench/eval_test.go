@@ -100,3 +100,36 @@ func TestGradeWorkspace(t *testing.T) {
 		}
 	})
 }
+
+func TestEditApplied(t *testing.T) {
+	cases := map[string]struct {
+		change func(ws string) error
+		want   bool
+	}{
+		"untouched": {func(ws string) error { return nil }, false},
+		"edited file": {func(ws string) error {
+			return os.WriteFile(filepath.Join(ws, "add.go"), []byte(addFixed), 0o644)
+		}, true},
+		"new file": {func(ws string) error {
+			return os.WriteFile(filepath.Join(ws, "extra.go"), []byte("package fixture\n"), 0o644)
+		}, true},
+		"deleted file": {func(ws string) error {
+			return os.Remove(filepath.Join(ws, "add.go"))
+		}, true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			task, ws := newAddWorkspace(t)
+			if err := tc.change(ws); err != nil {
+				t.Fatal(err)
+			}
+			got, err := editApplied(task, ws)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Errorf("editApplied = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

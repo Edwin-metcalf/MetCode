@@ -12,8 +12,6 @@ import (
 
 func main() {
 	os.Exit(run(os.Args[1:]))
-	//will need to import set up validate it then run it
-	//then grade the output
 }
 
 func run(args []string) int {
