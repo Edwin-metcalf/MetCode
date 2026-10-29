@@ -31,3 +31,6 @@ func readConfirmAnswer() bool {
 	}
 	return false
 }
+
+// this is used to help run the bench marks mostly
+var Approve = func(kind string) bool { return readConfirmAnswer() }
