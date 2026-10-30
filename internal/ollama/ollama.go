@@ -4,10 +4,32 @@ package ollama
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"time"
+)
+
+// requestTimeout bounds a single call to ollama. http.DefaultClient has no
+// timeout, so without this a hung server stalls a bench run forever. It has to
+// clear a cold model load plus a full generation, so it is generous.
+const requestTimeout = 2 * time.Minute
+
+var (
+	// Client is used for every chat call to ollama. It is a var so a test can
+	// swap in a short timeout.
+	Client = &http.Client{Timeout: requestTimeout}
+
+	// ErrUnreachable means the request never got an answer: refused, no route,
+	// or DNS failure. It is a harness problem, not model behavior.
+	ErrUnreachable = errors.New("ollama is unreachable")
+
+	// ErrTimeout means the server accepted the request but did not finish in
+	// time.
+	ErrTimeout = errors.New("ollama request timed out")
 )
 
 type Message struct {
@@ -83,9 +105,13 @@ func Chat(req ChatRequest, host string) (ChatResponse, error) {
 	body := bytes.NewBuffer(b)
 	url := host + "/api/chat"
 
-	resp, err := http.Post(url, "application/json", body)
+	resp, err := Client.Post(url, "application/json", body)
 	if err != nil {
-		return ChatResponse{}, fmt.Errorf("error contacting ollama at %s: %w", url, err)
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return ChatResponse{}, fmt.Errorf("%w: %s: %v", ErrTimeout, url, err)
+		}
+		return ChatResponse{}, fmt.Errorf("%w: %s: %v", ErrUnreachable, url, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

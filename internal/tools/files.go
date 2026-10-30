@@ -121,11 +121,11 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 
 	newContent := strings.Replace(fileContent, oldText, newText, 1)
 
-	fmt.Println("----- proposed change to ", path, "------")
-	fmt.Println(prefixLines(oldText, "- "))
-	fmt.Println(prefixLines(newText, "+ "))
-	fmt.Println("------------------------------")
-	fmt.Println("apply this edit? (y/n)")
+	printLoud("----- proposed change to ", path, "------")
+	printLoud(prefixLines(oldText, "- "))
+	printLoud(prefixLines(newText, "+ "))
+	printLoud("------------------------------")
+	printLoud("apply this edit? (y/n)")
 
 	if !Approve("edit") {
 		return ollama.Message{Role: "tool", Content: "Edit canceled by user"}
@@ -140,10 +140,10 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 
 func createFileHelper(path string, newText string) ollama.Message {
 	//helper to create a file if edit file is called on a file that does not exist
-	fmt.Println("----- proposed change to new file: ", path, "------")
-	fmt.Println(prefixLines(newText, "+ "))
-	fmt.Println("------------------------------")
-	fmt.Println("apply this edit? (y/n)")
+	printLoud("----- proposed change to new file: ", path, "------")
+	printLoud(prefixLines(newText, "+ "))
+	printLoud("------------------------------")
+	printLoud("apply this edit? (y/n)")
 
 	if !Approve("edit") {
 		return ollama.Message{Role: "tool", Content: "Edit canceled by user"}

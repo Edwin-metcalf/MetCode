@@ -2,10 +2,12 @@ package ollama
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestChat_SendsRequestAndDecodesToolCalls(t *testing.T) {
@@ -44,4 +46,36 @@ func TestChat_SendsRequestAndDecodesToolCalls(t *testing.T) {
 	if call.Function.Name != "read_file" || call.Function.Arguments["path"] != "main.go" {
 		t.Errorf("tool call decoded wrong: %+v", call)
 	}
+}
+
+// bench has to tell a dead server from a slow one, so Chat marks each case with
+// a sentinel error instead of a plain message.
+func TestChat_ClassifiesTransportFailures(t *testing.T) {
+	t.Run("unreachable", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		url := srv.URL
+		srv.Close() // nothing is listening on that address now
+
+		_, err := Chat(ChatRequest{}, url)
+		if !errors.Is(err, ErrUnreachable) {
+			t.Errorf("err = %v, want ErrUnreachable", err)
+		}
+	})
+
+	t.Run("timeout", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(200 * time.Millisecond)
+			io.WriteString(w, `{"message":{"role":"assistant","content":"late"}}`)
+		}))
+		defer srv.Close()
+
+		old := Client
+		Client = &http.Client{Timeout: 20 * time.Millisecond}
+		t.Cleanup(func() { Client = old })
+
+		_, err := Chat(ChatRequest{}, srv.URL)
+		if !errors.Is(err, ErrTimeout) {
+			t.Errorf("err = %v, want ErrTimeout", err)
+		}
+	})
 }

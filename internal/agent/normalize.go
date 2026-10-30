@@ -49,7 +49,9 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 	err := json.Unmarshal([]byte(stripped), &rawData)
 
 	if err != nil {
-		fmt.Printf("error unmarshaling tool call: %v\n", err)
+		if !a.Quiet {
+			fmt.Printf("error unmarshaling tool call: %v\n", err)
+		}
 		return m
 	}
 	name, args := "", map[string]any(nil)

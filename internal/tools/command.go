@@ -41,11 +41,11 @@ func runCommandHelper(call *ollama.ToolCall, root string) ollama.Message {
 		}
 	}
 
-	fmt.Println("----- MetCode wants to run a command ------")
-	fmt.Println("directory: ", dir)
-	fmt.Println("Command: ", command, strings.Join(arguments, " "))
-	fmt.Println("------------------------------")
-	fmt.Println("Run this command? (y/n)")
+	printLoud("----- MetCode wants to run a command ------")
+	printLoud("directory: ", dir)
+	printLoud("Command: ", command, strings.Join(arguments, " "))
+	printLoud("------------------------------")
+	printLoud("Run this command? (y/n)")
 
 	if !Approve("command") {
 		return ollama.Message{Role: "tool", Content: "command canceled by user"}

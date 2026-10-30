@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -122,6 +123,28 @@ func total(m map[string]int) int {
 	return n
 }
 
+// captureStdout runs f and returns everything it printed.
+// It swaps os.Stdout, so tests using it must not call t.Parallel().
+func captureStdout(t *testing.T, f func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = old }()
+
+	f()
+
+	w.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
 // UNVERIFIED: these tool names and argument shapes are guesses.
 // Check them against the schemas in tools.All and adjust. Only the tests
 // marked "needs tool schema" depend on them.
@@ -221,7 +244,7 @@ func TestResultJSONKeys(t *testing.T) {
 	}
 	want := []string{
 		"task", "model", "run_index", "num_ctx", "temperature", "prompt_hash", "git_commit",
-		"passed", "tampered", "ended", "edit_applied",
+		"passed", "tampered", "ended", "edit_applied", "final_reply", "transcript",
 		"tool_calls", "tool_errors", "unnecessary_calls", "declined_commands",
 		"rounds", "prompt_tokens", "output_tokens", "wall_ms",
 	}
@@ -375,13 +398,47 @@ func TestRun_ServerErrorIsModelError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a failing model is a data point, not a harness error: %v", err)
 	}
-	// TODO(later): when Run tells an unreachable server apart from a model failure,
-	// this expectation changes.
+	// a 500 is still a model failure for now; only transport failures are told
+	// apart (see TestRun_UnreachableServerIsNotAModelError)
 	if res.Ended != "model_error" {
 		t.Errorf("Ended = %q, want model_error", res.Ended)
 	}
 	if res.Passed {
 		t.Error("nothing was fixed, so it must not pass")
+	}
+}
+
+func TestRun_UnreachableServerIsNotAModelError(t *testing.T) {
+	task, _ := newAddWorkspace(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close() // nothing is listening on that address now
+
+	res, err := Run(task, Config{Model: "fake-model", Host: url})
+	if err != nil {
+		t.Fatalf("an unreachable server is a data point, not a harness error: %v", err)
+	}
+	if res.Ended != "server_unreachable" {
+		t.Errorf("Ended = %q, want server_unreachable", res.Ended)
+	}
+	if res.Passed {
+		t.Error("nothing was fixed, so it must not pass")
+	}
+}
+
+// stdout belongs to the JSON row, so Run must not print. The scripted edit is
+// the noisiest path: [call], [tool], and the edit diff all used to print.
+func TestRun_IsQuiet(t *testing.T) {
+	task, _ := newAddWorkspace(t)
+	srv := newFakeOllama(t, toolReply(toolEdit, fixAddArgs), textReply("Fixed Add."))
+
+	out := captureStdout(t, func() { runTask(t, task, srv) })
+
+	if out != "" {
+		t.Errorf("Run printed to stdout, want nothing: %q", out)
+	}
+	if tools.Quiet {
+		t.Error("Run did not restore tools.Quiet")
 	}
 }
 

@@ -36,10 +36,12 @@ type Result struct {
 	GitCommit   string  `json:"git_commit"`
 
 	//outcome from Grade and the error Turn returned
-	Passed      bool   `json:"passed"`
-	Tampered    bool   `json:"tampered"`
-	Ended       string `json:"ended"` //how the round ended could be ok max_rounds model_error etc
-	EditApplied bool   `json:"edit_applied"`
+	Passed      bool             `json:"passed"`
+	Tampered    bool             `json:"tampered"`
+	Ended       string           `json:"ended"` //how the round ended could be ok max_rounds model_error etc
+	EditApplied bool             `json:"edit_applied"`
+	FinalReply  string           `json:"final_reply"`
+	Transcript  []ollama.Message `json:"transcript"`
 
 	//behavior from summarize Approve counter and workspace
 	ToolCalls        map[string]int `json:"tool_calls"`
@@ -171,22 +173,30 @@ func Run(task Task, cfg Config) (Result, error) {
 
 	defer func() { tools.Approve = old }()
 
+	oldQuiet := tools.Quiet
+	tools.Quiet = true
+	defer func() { tools.Quiet = oldQuiet }()
+
 	var stats agent.TurnStats
-	a := agent.Agent{Model: cfg.Model, Host: host, Root: workDir, Stats: func(s agent.TurnStats) { stats = s }}
+	a := agent.Agent{Model: cfg.Model, Host: host, Root: workDir, Quiet: true, Stats: func(s agent.TurnStats) { stats = s }}
 
 	sys := prompt.Default()
 	history := []ollama.Message{{Role: "system", Content: sys}}
 
 	ended := "ok"
-	_, turnErr := a.Turn(&history, task.Prompt)
+	reply, turnErr := a.Turn(&history, task.Prompt)
 	if turnErr != nil {
-		//TODO an un reachable ollama server is not a model_error
-		//be able to tell them apart would be good to keep garbage rows out
-		if errors.Is(turnErr, agent.ErrMaxRounds) {
+		//an unreachable server or a timeout is a harness problem, not the model
+		switch {
+		case errors.Is(turnErr, agent.ErrMaxRounds):
 			ended = "max_rounds"
-		} else if errors.Is(turnErr, agent.ErrTooManyFailures) {
+		case errors.Is(turnErr, agent.ErrTooManyFailures):
 			ended = "too_many_failures"
-		} else {
+		case errors.Is(turnErr, ollama.ErrTimeout):
+			ended = "timeout"
+		case errors.Is(turnErr, ollama.ErrUnreachable):
+			ended = "server_unreachable"
+		default:
 			ended = "model_error"
 		}
 	}
@@ -220,6 +230,7 @@ func Run(task Task, cfg Config) (Result, error) {
 		NumCtx: agent.NumCTX, Temperature: agent.Temperature,
 		PromptHash: hex.EncodeToString(sum[:]), GitCommit: cfg.GitCommit,
 		Passed: grade.Passed, Tampered: grade.Tampered, Ended: ended, EditApplied: edited,
+		FinalReply: reply, Transcript: history[1:],
 		ToolCalls: calls, ToolErrors: errs,
 		UnnecessaryCalls: unnecessary, DeclinedCommands: declined,
 		Rounds: stats.Rounds, PromptTokens: stats.PromptTokens, OutputTokens: stats.OutputTokens,

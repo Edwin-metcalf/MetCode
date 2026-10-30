@@ -32,6 +32,8 @@ type Agent struct {
 	// returns runs when the request finishes (the UI uses it for the spinner).
 	Wait  func() func()
 	Stats func(TurnStats)
+	// silences the per-call log; bench sets it so a run prints only its JSON line
+	Quiet bool
 }
 
 type TurnStats struct {
@@ -60,9 +62,13 @@ func addStats(s *TurnStats, r ollama.ChatResponse) {
 
 // logCall folds one model call into the turn totals and prints a line for it.
 // printing lives here rather than in addStats so the accumulator stays pure
-func logCall(s *TurnStats, r ollama.ChatResponse) {
+func logCall(s *TurnStats, r ollama.ChatResponse, quiet bool) {
 	addStats(s, r)
 	s.Calls++
+
+	if quiet {
+		return
+	}
 
 	perSec := 0.0
 	if r.EvalDuration > 0 {
@@ -146,7 +152,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 		*history = (*history)[:len(*history)-1]
 		return "", err
 	}
-	logCall(stats, resp)
+	logCall(stats, resp, a.Quiet)
 
 	resp.Message = firstCallOnly(resp.Message)
 	resp.Message = a.normalizeMessage(resp.Message)
@@ -186,7 +192,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 			return "", err
 		}
 
-		logCall(stats, resp)
+		logCall(stats, resp, a.Quiet)
 		resp.Message = firstCallOnly(resp.Message)
 		resp.Message = a.normalizeMessage(resp.Message)
 		*history = append(*history, resp.Message)
