@@ -180,8 +180,8 @@ func secs(ms int64) string { return fmt.Sprintf("%.1f", float64(ms)/1000) }
 
 func FormatMarkdown(groups []Group) string {
 	var b strings.Builder
-	b.WriteString("| Model | Task | N | Pass | ok/max/fail/err | No-edit claims | Tampered | Calls/run | Tool errors | Unnecessary/run | Wall s (median, range) | Prompt tok/run |\n")
-	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("| Model | Task | N | Pass | ok/max/fail/err | timeout/unreach | No-edit claims | Tampered | Calls/run | Tool errors | Unnecessary/run | Wall s (median, range) | Prompt tok/run |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, g := range groups {
 		s := g.Stats()
 		pass := fmt.Sprintf("%d/%d", s.Passed, s.N)
@@ -191,9 +191,10 @@ func FormatMarkdown(groups []Group) string {
 			pass, noEdit = "n/a", "n/a"
 			unnecessary = fmt.Sprintf("%.1f", s.MeanUnnecessary)
 		}
-		fmt.Fprintf(&b, "| %s | %s | %d | %s | %d/%d/%d/%d | %s | %d | %.1f | %d | %s | %s (%s-%s) | %.0f |\n",
+		fmt.Fprintf(&b, "| %s | %s | %d | %s | %d/%d/%d/%d | %d/%d | %s | %d | %.1f | %d | %s | %s (%s-%s) | %.0f |\n",
 			g.Model, g.Task, s.N, pass,
 			s.Ended["ok"], s.Ended["max_rounds"], s.Ended["too_many_failures"], s.Ended["model_error"],
+			s.Ended["timeout"], s.Ended["server_unreachable"],
 			noEdit, s.Tampered, s.MeanCalls, s.ToolErrors, unnecessary,
 			secs(s.WallMedianMS), secs(s.WallMinMS), secs(s.WallMaxMS), s.MeanPromptTokens)
 	}

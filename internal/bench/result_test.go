@@ -246,7 +246,7 @@ func TestResultJSONKeys(t *testing.T) {
 	}
 	want := []string{
 		"task", "model", "run_index", "num_ctx", "temperature", "prompt_hash", "git_commit",
-		"passed", "tampered", "ended", "edit_applied", "final_reply", "transcript",
+		"passed", "no_tools", "tampered", "ended", "edit_applied", "final_reply", "transcript",
 		"tool_calls", "tool_errors", "unnecessary_calls", "declined_commands",
 		"rounds", "prompt_tokens", "output_tokens", "wall_ms", "load_ms", "prefill_ms", "gen_ms",
 	}
@@ -264,7 +264,7 @@ func TestResultJSONRoundTrip(t *testing.T) {
 	in := Result{
 		Task: "t", Model: "m", RunIndex: 2, NumCtx: 8192, Temperature: 0.2,
 		PromptHash: "h", GitCommit: "g",
-		Passed: true, Tampered: true, Ended: "max_rounds", EditApplied: true,
+		Passed: true, NoTools: true, Tampered: true, Ended: "max_rounds", EditApplied: true,
 		ToolCalls: map[string]int{"read_file": 3}, ToolErrors: map[string]int{"edit_file": 1},
 		UnnecessaryCalls: 4, DeclinedCommands: 5,
 		Rounds: 6, PromptTokens: 7, OutputTokens: 8, WallMS: 9,
@@ -466,7 +466,7 @@ func TestRun_NoToolsTaskIsNotGraded(t *testing.T) {
 
 	res := runTask(t, task, srv)
 
-	if res.Ended != "ok" || res.Passed || res.UnnecessaryCalls != 0 || res.EditApplied {
+	if res.Ended != "ok" || !res.NoTools || res.Passed || res.UnnecessaryCalls != 0 || res.EditApplied {
 		t.Errorf("unexpected result for a polite no_tools run: %+v", res)
 	}
 }
@@ -479,7 +479,7 @@ func TestRun_ScriptedCorrectEditPasses(t *testing.T) { // needs tool schema
 
 	res := runTask(t, task, srv)
 
-	if !res.Passed || res.Tampered {
+	if !res.Passed || res.NoTools || res.Tampered {
 		t.Errorf("a correct edit should pass: %+v", res)
 	}
 	if !res.EditApplied {

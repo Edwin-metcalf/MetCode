@@ -354,7 +354,7 @@ func TestFormatMarkdown_Cells(t *testing.T) {
 	}
 	want := map[string]string{
 		"Model": "m", "Task": "t", "N": "2", "Pass": "1/2",
-		"ok/max/fail/err": "2/0/0/0", "No-edit claims": "1", "Tampered": "0",
+		"ok/max/fail/err": "2/0/0/0", "timeout/unreach": "0/0", "No-edit claims": "1", "Tampered": "0",
 		"Calls/run": "2.0", "Tool errors": "0", "Unnecessary/run": "-",
 		"Wall s (median, range)": "2.5 (2.0-3.0)", "Prompt tok/run": "1500",
 	}
@@ -381,6 +381,22 @@ func TestFormatMarkdown_NoToolsRowShowsNA(t *testing.T) {
 	}
 	if rows[0]["Unnecessary/run"] != "1.0" {
 		t.Errorf("Unnecessary/run = %q, want 1.0", rows[0]["Unnecessary/run"])
+	}
+}
+
+func TestFormatMarkdown_ShowsTransportFailures(t *testing.T) {
+	g := Group{Model: "m", Task: "t", Rows: []Result{
+		mkResult("m", "t", func(r *Result) { r.Ended = "timeout" }),
+		mkResult("m", "t", func(r *Result) { r.Ended = "server_unreachable" }),
+	}}
+
+	rows := parseTable(t, FormatMarkdown([]Group{g}))
+
+	if got := rows[0]["timeout/unreach"]; got != "1/1" {
+		t.Errorf("timeout/unreach = %q, want 1/1", got)
+	}
+	if got := rows[0]["ok/max/fail/err"]; got != "0/0/0/0" {
+		t.Errorf("ok/max/fail/err = %q, want 0/0/0/0", got)
 	}
 }
 
