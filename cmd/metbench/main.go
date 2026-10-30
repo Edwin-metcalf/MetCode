@@ -31,8 +31,7 @@ func run(args []string) int {
 	case "run":
 		return runRun(args[1:])
 	case "report":
-		fmt.Fprintln(os.Stderr, "report: not implemented yet")
-		return 2
+		return runReport(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", args[0])
 		usage()
@@ -210,4 +209,47 @@ func gitCommit() string {
 	}
 
 	return outString
+}
+
+func runReport(args []string) int {
+	fs := flag.NewFlagSet("report", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "usage: metbench report <results.jsonl>...")
+		return 2
+	}
+
+	var all []bench.Result
+	for _, path := range fs.Args() {
+		rows, err := loadResultsFile(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", path, err)
+			return 1
+		}
+		all = append(all, rows...)
+	}
+
+	groups := bench.GroupResults(all)
+	for _, g := range groups {
+		for _, w := range g.Warnings() {
+			fmt.Fprintln(os.Stderr, "warning:", w)
+		}
+	}
+	fmt.Print(bench.FormatMarkdown(groups))
+	return 0
+}
+
+// its own function so the file is closed per path, not at the end of the loop
+func loadResultsFile(path string) ([]bench.Result, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return bench.LoadResults(f)
 }

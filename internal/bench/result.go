@@ -37,6 +37,7 @@ type Result struct {
 
 	//outcome from Grade and the error Turn returned
 	Passed      bool             `json:"passed"`
+	NoTools     bool             `json:"no_tools"`
 	Tampered    bool             `json:"tampered"`
 	Ended       string           `json:"ended"` //how the round ended could be ok max_rounds model_error etc
 	EditApplied bool             `json:"edit_applied"`
@@ -232,7 +233,7 @@ func Run(task Task, cfg Config) (Result, error) {
 		Task: task.Name, Model: cfg.Model, RunIndex: cfg.RunIndex,
 		NumCtx: agent.NumCTX, Temperature: agent.Temperature,
 		PromptHash: hex.EncodeToString(sum[:]), GitCommit: cfg.GitCommit,
-		Passed: grade.Passed, Tampered: grade.Tampered, Ended: ended, EditApplied: edited,
+		Passed: grade.Passed, NoTools: task.NoTools, Tampered: grade.Tampered, Ended: ended, EditApplied: edited,
 		FinalReply: reply, Transcript: history[1:],
 		ToolCalls: calls, ToolErrors: errs,
 		UnnecessaryCalls: unnecessary, DeclinedCommands: declined,
