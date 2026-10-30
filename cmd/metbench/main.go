@@ -117,7 +117,7 @@ func runRun(args []string) int {
 		modelList = append(modelList, m)
 	}
 	if *n < 1 {
-		fmt.Fprintln(os.Stderr, "-n must be at least 1\n")
+		fmt.Fprintln(os.Stderr, "-n must be at least 1")
 	}
 
 	tasks, err := bench.LoadTasks(*taskDir)
