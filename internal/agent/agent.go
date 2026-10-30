@@ -32,6 +32,8 @@ type Agent struct {
 	// returns runs when the request finishes (the UI uses it for the spinner).
 	Wait  func() func()
 	Stats func(TurnStats)
+	// silences the per-call log; bench sets it so a run prints only its JSON line
+	Quiet bool
 }
 
 type TurnStats struct {
@@ -45,9 +47,10 @@ type TurnStats struct {
 	WallTime     time.Duration
 }
 
+// exported to bench
 // constants for communication with the model
-const temperature = 0.2
-const numCTX = 8192
+const Temperature = 0.2
+const NumCTX = 8192
 
 func addStats(s *TurnStats, r ollama.ChatResponse) {
 	s.PromptTokens += r.PromptEvalCount
@@ -59,9 +62,13 @@ func addStats(s *TurnStats, r ollama.ChatResponse) {
 
 // logCall folds one model call into the turn totals and prints a line for it.
 // printing lives here rather than in addStats so the accumulator stays pure
-func logCall(s *TurnStats, r ollama.ChatResponse) {
+func logCall(s *TurnStats, r ollama.ChatResponse, quiet bool) {
 	addStats(s, r)
 	s.Calls++
+
+	if quiet {
+		return
+	}
 
 	perSec := 0.0
 	if r.EvalDuration > 0 {
@@ -80,8 +87,8 @@ func BuildChatRequest(history []ollama.Message, model string) ollama.ChatRequest
 	outgoing.Messages = history
 	outgoing.Model = model
 	outgoing.Stream = false
-	outgoing.Options.Temperature = temperature
-	outgoing.Options.NumCtx = numCTX
+	outgoing.Options.Temperature = Temperature
+	outgoing.Options.NumCtx = NumCTX
 	outgoing.Tools = tools.All
 
 	return outgoing
@@ -94,8 +101,8 @@ func BuildChatRequestNoTools(history []ollama.Message, model string) ollama.Chat
 	outgoing.Messages = history
 	outgoing.Model = model
 	outgoing.Stream = false
-	outgoing.Options.Temperature = temperature
-	outgoing.Options.NumCtx = numCTX
+	outgoing.Options.Temperature = Temperature
+	outgoing.Options.NumCtx = NumCTX
 	outgoing.Tools = []ollama.Tool{}
 
 	return outgoing
@@ -145,7 +152,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 		*history = (*history)[:len(*history)-1]
 		return "", err
 	}
-	logCall(stats, resp)
+	logCall(stats, resp, a.Quiet)
 
 	resp.Message = firstCallOnly(resp.Message)
 	resp.Message = a.normalizeMessage(resp.Message)
@@ -185,7 +192,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 			return "", err
 		}
 
-		logCall(stats, resp)
+		logCall(stats, resp, a.Quiet)
 		resp.Message = firstCallOnly(resp.Message)
 		resp.Message = a.normalizeMessage(resp.Message)
 		*history = append(*history, resp.Message)

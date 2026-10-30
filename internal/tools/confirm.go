@@ -31,3 +31,7 @@ func readConfirmAnswer() bool {
 	}
 	return false
 }
+
+// this is used to help run the bench marks mostly
+// main metcod would never replace it but bench mark does
+var Approve = func(kind string) bool { return readConfirmAnswer() }

@@ -1,0 +1,5 @@
+{
+  "prompt": "The tests in cart_test.go fail. Find the bug and fix it so they pass. Do not edit the test file.",
+  "test_cmd": ["go", "test", "-timeout", "60s", "./..."],
+  "timeout_sec": 90
+}

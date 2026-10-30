@@ -8,8 +8,22 @@ import (
 	"github.com/Edwin-metcalf/MetCode/internal/plan"
 )
 
+// Quiet silences the per-call log and the confirm prompts. The UI leaves it
+// false; bench sets it so a run emits only its JSON line.
+var Quiet bool
+
+// printLoud is where tool printing goes. Quiet turns it off.
+func printLoud(a ...any) {
+	if Quiet {
+		return
+	}
+	fmt.Println(a...)
+}
+
 func Handle(call ollama.ToolCall, root string, currentPlan *[]plan.Item) ollama.Message {
-	fmt.Printf("[tool] %s %v\n", call.Function.Name, call.Function.Arguments)
+	if !Quiet {
+		fmt.Printf("[tool] %s %v\n", call.Function.Name, call.Function.Arguments)
+	}
 	toolName := call.Function.Name
 	switch toolName {
 	case "list_directory":

@@ -10,6 +10,10 @@ import (
 //go:embed system_prompt.md
 var defaultSystemPrompt string
 
+// default returns the embedded system prompt withouttouching disk
+// mainly for the bench harness
+func Default() string { return defaultSystemPrompt }
+
 func LoadOrCreateSystemPrompt(home string) (string, error) {
 	path := filepath.Join(home, ".metcode", "system_prompt.md")
 	content, err := os.ReadFile(path)
