@@ -61,6 +61,8 @@ func build(t *testing.T, steps ...string) []ollama.Message {
 func reply(msg map[string]any) string {
 	b, _ := json.Marshal(map[string]any{
 		"message": msg, "done": true, "prompt_eval_count": 10, "eval_count": 5,
+		// durations are nanoseconds, the same unit ollama reports
+		"load_duration": 7_000_000, "prompt_eval_duration": 3_000_000, "eval_duration": 11_000_000,
 	})
 	return string(b)
 }
@@ -246,7 +248,7 @@ func TestResultJSONKeys(t *testing.T) {
 		"task", "model", "run_index", "num_ctx", "temperature", "prompt_hash", "git_commit",
 		"passed", "tampered", "ended", "edit_applied", "final_reply", "transcript",
 		"tool_calls", "tool_errors", "unnecessary_calls", "declined_commands",
-		"rounds", "prompt_tokens", "output_tokens", "wall_ms",
+		"rounds", "prompt_tokens", "output_tokens", "wall_ms", "load_ms", "prefill_ms", "gen_ms",
 	}
 	for _, k := range want {
 		if _, ok := got[k]; !ok {
@@ -266,6 +268,7 @@ func TestResultJSONRoundTrip(t *testing.T) {
 		ToolCalls: map[string]int{"read_file": 3}, ToolErrors: map[string]int{"edit_file": 1},
 		UnnecessaryCalls: 4, DeclinedCommands: 5,
 		Rounds: 6, PromptTokens: 7, OutputTokens: 8, WallMS: 9,
+		LoadMS: 10, PrefillMS: 11, GenMS: 12,
 	}
 	b, err := json.Marshal(in)
 	if err != nil {
@@ -330,6 +333,20 @@ func TestRun_RecordsIdentity(t *testing.T) {
 	}
 	if res.PromptHash != hex.EncodeToString(sum[:]) {
 		t.Errorf("PromptHash = %q", res.PromptHash)
+	}
+}
+
+// load, prefill and generation come from ollama's per-call durations, so a
+// report can subtract them from WallMS and see the model's own speed.
+func TestRun_RecordsModelTiming(t *testing.T) {
+	task, _ := newAddWorkspace(t)
+	srv := newFakeOllama(t, textReply("ok"))
+
+	res := runTask(t, task, srv)
+
+	if res.LoadMS != 7 || res.PrefillMS != 3 || res.GenMS != 11 {
+		t.Errorf("timing = load %d prefill %d gen %d, want 7/3/11 from the scripted reply",
+			res.LoadMS, res.PrefillMS, res.GenMS)
 	}
 }
 

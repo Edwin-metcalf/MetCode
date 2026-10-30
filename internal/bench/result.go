@@ -53,7 +53,10 @@ type Result struct {
 	Rounds       int   `json:"rounds"`
 	PromptTokens int   `json:"prompt_tokens"`
 	OutputTokens int   `json:"output_tokens"`
-	WallMS       int64 `json:"wall_ms"`
+	WallMS       int64 `json:"wall_ms"`    //whole turn: load + prefill + generation + tool time
+	LoadMS       int64 `json:"load_ms"`    //part of WallMS spent loading the model, from ollama
+	PrefillMS    int64 `json:"prefill_ms"` //part of WallMS spent on prompt eval, from ollama
+	GenMS        int64 `json:"gen_ms"`     //part of WallMS spent generating, from ollama
 }
 
 // summarizes history to find the tool calls and tool_calls that errored
@@ -234,7 +237,10 @@ func Run(task Task, cfg Config) (Result, error) {
 		ToolCalls: calls, ToolErrors: errs,
 		UnnecessaryCalls: unnecessary, DeclinedCommands: declined,
 		Rounds: stats.Rounds, PromptTokens: stats.PromptTokens, OutputTokens: stats.OutputTokens,
-		WallMS: stats.WallTime.Milliseconds(),
+		WallMS:    stats.WallTime.Milliseconds(),
+		LoadMS:    stats.LoadTime.Milliseconds(),
+		PrefillMS: stats.PrefillTime.Milliseconds(),
+		GenMS:     stats.GenTime.Milliseconds(),
 	}, nil
 
 }
