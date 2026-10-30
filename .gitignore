@@ -8,3 +8,8 @@
 coverage.out
 *.test
 .DS_Store
+
+#bench section
+bench/results/*
+!bench/results/baseline-*.jsonl
+!bench/results/ablation-*.jsonl
