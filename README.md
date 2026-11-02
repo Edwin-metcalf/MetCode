@@ -13,6 +13,7 @@ Local AI. Your Terminal. Your machines.
 <p> Run an agentic coding assistant on your own machine using Ollama specifically optimized for small models and budget hardware. </p>
 
 [![CI](https://github.com/Edwin-metcalf/MetCode/actions/workflows/ci.yml/badge.svg)](https://github.com/Edwin-metcalf/MetCode/actions/workflows/ci.yml)
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/Edwin-metcalf/badge.svg)](https://hub.xerj.org/contributors/Edwin-metcalf)
 </div>
 
 ## Table of Contents
@@ -48,6 +49,8 @@ If small model optimization is interesting, you have an old GPU sitting around, 
 
 MetCode is a local command line assistant built in Go on top of Ollama.
 It provides an interactive interface for working with local LLMs and having your own personal assistant.
+
+Sections of MetCode are featured in the XERJ corpus.
 
 ## MetCode includes
 
