@@ -24,6 +24,28 @@ func isProtected(path string) bool {
 	return protectedFiles[filepath.Base(path)]
 }
 
+// arg state tells what happened when looking up a tool argument. Missing and wrong type
+// are seperate erros. So this helps tell the model a better return message.
+type argState int
+
+const (
+	argFound argState = iota
+	argMissing
+	argWrongType
+)
+
+func stringArg(args map[string]any, key string) (string, argState) {
+	raw, present := args[key]
+	if !present {
+		return "", argMissing
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", argWrongType
+	}
+	return value, argFound
+}
+
 func readFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	path, ok := call.Function.Arguments["path"].(string)
 	if !ok {
@@ -78,14 +100,26 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 		return ollama.Message{Role: "tool", Content: "error: path is possibly dangerous"}
 	}
 
-	oldText, ok := call.Function.Arguments["old_text"].(string)
-	if !ok {
-		return ollama.Message{Role: "tool", Content: "error: missing required parameter old_text use an empty string for an empty file"}
+	// old text strick here, ok if empty that would mean new file is being created
+	oldText, oldState := stringArg(call.Function.Arguments, "old_text")
+	switch oldState {
+	case argWrongType:
+		return ollama.Message{Role: "tool", Content: "error: old_text must be a string, not a different JSON type"}
+	case argMissing:
+		return ollama.Message{Role: "tool", Content: "error: missing required parameter old_text: the exact snippet to replace, copied from read_file. Use an empty string only when creating a new file"}
 	}
 
-	newText, ok := call.Function.Arguments["new_text"].(string)
-	if !ok {
-		return ollama.Message{Role: "tool", Content: "error no new text found"}
+	// some models mistake new_text and sent "content", we catch for that as both keys
+	// mean the same thing. If we are returning teh wrong type then that is different then missing arg
+	newText, newState := stringArg(call.Function.Arguments, "new_text")
+	if newState == argMissing {
+		newText, newState = stringArg(call.Function.Arguments, "content")
+	}
+	switch newState {
+	case argWrongType:
+		return ollama.Message{Role: "tool", Content: "error: new_text (or its alias content) must be a string, not a different JSON type"}
+	case argMissing:
+		return ollama.Message{Role: "tool", Content: "error: missing required parameter new_text: the replacement text"}
 	}
 
 	if !strings.Contains(newText, "\n") && strings.Contains(newText, `\n`) {

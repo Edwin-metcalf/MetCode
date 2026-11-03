@@ -40,20 +40,31 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 		return a.normalizeMessage(noPrefixMessage)
 	}
 
-	if !strings.HasPrefix(stripped, "{") {
+	// find the first '{' and decode from there instead of requiring the message
+	// to start with one. Two shapes from baseline-2 needed this:
+	//   - a sentence of reasoning, then the call (add-bug rows 1-4)
+	//   - two calls written back to back (add-bug-descriptive rows 5, 6, 9)
+	// Index returns -1 when there is no brace at all, which is the "nothing to
+	// parse" case — note that is the opposite of what `curlyIdx == 0` tested:
+	// 0 means the message starts with '{', i.e. the ordinary case.
+	start := strings.Index(stripped, "{")
+	if start < 0 {
 		return m
 	}
 
+	// Decode reads exactly one JSON value and leaves the rest of the reader
+	// alone. That is the whole difference from json.Unmarshal, which decodes the
+	// entire string and failed with "Extra data: line 3 column 1" as soon as a
+	// second call followed the first. We keep only the first call, which matches
+	// firstCallOnly's one-call-per-message rule.
 	var rawData rawCall
-
-	err := json.Unmarshal([]byte(stripped), &rawData)
-
-	if err != nil {
+	if err := json.NewDecoder(strings.NewReader(stripped[start:])).Decode(&rawData); err != nil {
 		if !a.Quiet {
 			fmt.Printf("error unmarshaling tool call: %v\n", err)
 		}
 		return m
 	}
+
 	name, args := "", map[string]any(nil)
 
 	if rawData.Function != nil {

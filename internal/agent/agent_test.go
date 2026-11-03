@@ -261,6 +261,25 @@ func TestNormalizeMessage(t *testing.T) {
 			content:  `{"name": "edit_file", "arguments": }`,
 			wantCall: false,
 		},
+
+		{
+			// add-bug rows 1-4: a sentence of reasoning, then the call
+			name:     "prose then a call",
+			content:  "I'll start by listing the files.\n\n{\"name\":\"list_directory\",\"arguments\":{}}",
+			wantCall: true,
+			wantName: "list_directory",
+			wantArgs: map[string]any{},
+		},
+		{
+			// add-bug-descriptive rows 5, 6, 9: two calls back to back.
+			// only the first is returned, because firstCallOnly keeps one call
+			// per message anyway; the second must not make decoding fail
+			name:     "two calls back to back",
+			content:  "{\"name\":\"list_directory\",\"arguments\":{}}\n\n{\"name\":\"read_file\",\"arguments\":{\"path\":\"add.go\"}}",
+			wantCall: true,
+			wantName: "list_directory",
+			wantArgs: map[string]any{},
+		},
 	}
 
 	a := &Agent{}
