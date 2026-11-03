@@ -21,8 +21,8 @@ func runCommandHelper(call *ollama.ToolCall, root string) ollama.Message {
 	dir := root
 	if rawPath, ok := call.Function.Arguments["path"].(string); ok && rawPath != "" {
 		// filepath.Join would fold /etc into root/etc instead of escaping, so
-		// reject absolute paths rather than silently resolving them
-		if filepath.IsAbs(rawPath) {
+		// reject absolute and rooted paths rather then silently resolcing them
+		if isRootedPath(rawPath) {
 			return ollama.Message{Role: "tool", Content: "error: path must be relative to the project root"}
 		}
 		resolved, err := resolveSafePath(root, rawPath)
@@ -65,4 +65,14 @@ func runCommandHelper(call *ollama.ToolCall, root string) ollama.Message {
 		Role:    "tool",
 		Content: fmt.Sprintf("Command ran succesfully, output: %v ", string(output)),
 	}
+}
+
+// isRootedPath is a helper that reorts wether path is absolute or rooted on any platform
+// this should fix windows specific issue whwere filepath.IsAbs("/etc") is false
+// so we check for leading slash or backslash and any name (C: , \\server)
+func isRootedPath(p string) bool {
+	return filepath.IsAbs(p) ||
+		filepath.VolumeName(p) != "" ||
+		strings.HasPrefix(p, "/") ||
+		strings.HasPrefix(p, `\`)
 }
