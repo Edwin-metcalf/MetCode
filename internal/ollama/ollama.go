@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"time"
@@ -125,21 +124,25 @@ func Chat(req ChatRequest, host string) (ChatResponse, error) {
 	return output, nil
 }
 
-func ListModels(host string) []string {
+func ListModels(host string) ([]string, error) {
 	resp, err := http.Get(host + "/api/tags")
 	if err != nil {
-		log.Fatalf("call to get ollama ls failed: %v", err)
+		return nil, fmt.Errorf("call to get ollama ls failed: %w", err)
 	}
 
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ollama returned %s: %s", resp.Status, msg)
+	}
 	var modelOutput modelWrapper
 	if err := json.NewDecoder(resp.Body).Decode(&modelOutput); err != nil {
-		log.Fatalf("failed to get model output %v:", err)
+		return nil, fmt.Errorf("failed to get model output: %w", err)
 	}
 
 	stringOutput := make([]string, len(modelOutput.Models))
 	for i := 0; i < len(modelOutput.Models); i++ {
 		stringOutput[i] = modelOutput.Models[i].Name
 	}
-	return stringOutput
+	return stringOutput, nil
 }

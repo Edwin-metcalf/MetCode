@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -54,7 +55,15 @@ func (c *CLI) handleCommand(command string, history *[]ollama.Message) {
 }
 
 func (c *CLI) chooseModel() string {
-	models := ollama.ListModels(c.Agent.Host)
+	models, err := ollama.ListModels(c.Agent.Host)
+	if err != nil {
+		fmt.Println("error listing models:", err)
+		if c.Agent.Model != "" {
+			return c.Agent.Model
+		}
+		fmt.Println("no model available; exiting")
+		os.Exit(1)
+	}
 	fmt.Println("Available models to choose from")
 
 	for idx, val := range models {
