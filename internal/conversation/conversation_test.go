@@ -80,3 +80,15 @@ func TestSave_AddsTxtSuffixOnce(t *testing.T) {
 		})
 	}
 }
+
+func TestList_MissingDirReturnsEmptyNoError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "never-created")
+
+	names, err := List(dir)
+	if err != nil {
+		t.Fatalf("List on a missing dir returned error: %v", err)
+	}
+	if len(names) != 0 {
+		t.Errorf("List on a missing dir = %v, want empty", names)
+	}
+}
