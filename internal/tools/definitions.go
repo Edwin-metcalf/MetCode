@@ -38,10 +38,12 @@ var All = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			// Note: the handler also accepts "content" as an alias for new_text (see files.go)
-			// This is supposed to help catch errors. The schema is the canonical contract, and
-			// advertising a whole-file-write key would invite models to use it. Models that
-			// get it wrong are correct and it does not cost more, just making a note of catching errors.
+			// Note: the handler rejects "content" with an error that names new_text
+			// (see files.go). content is not an alias: models use it to mean "the
+			// whole file", while new_text means "the lines that replace old_text",
+			// and applying a whole file at a snippet site corrupts the file. The
+			// schema stays the canonical contract and the handler error is the
+			// teaching channel for models that send the wrong key.
 			Name:        "edit_file",
 			Description: "Edit an existing file by replacing old_text with new_text. To create a new file, pass an empty old_text and put the entire file contents in new_text. old_text must match the file exactly and appear only once. Call read_file first and copy it from the real content.",
 			Parameters: ollama.Parameters{

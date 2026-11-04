@@ -109,17 +109,18 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 		return ollama.Message{Role: "tool", Content: "error: missing required parameter old_text: the exact snippet to replace, copied from read_file. Use an empty string only when creating a new file"}
 	}
 
-	// some models mistake new_text and sent "content", we catch for that as both keys
-	// mean the same thing. If we are returning teh wrong type then that is different then missing arg
+	// new_text is only the text that replaces the old_text snippet, not the whole
+	// file. Some models try to send content which is the entire new file. So tell the model
+	// the right key and let it fix itself.
 	newText, newState := stringArg(call.Function.Arguments, "new_text")
-	if newState == argMissing {
-		newText, newState = stringArg(call.Function.Arguments, "content")
-	}
 	switch newState {
 	case argWrongType:
-		return ollama.Message{Role: "tool", Content: "error: new_text (or its alias content) must be a string, not a different JSON type"}
+		return ollama.Message{Role: "tool", Content: "error: new_text must be a string, not a different JSON type"}
 	case argMissing:
-		return ollama.Message{Role: "tool", Content: "error: missing required parameter new_text: the replacement text"}
+		if _, contentState := stringArg(call.Function.Arguments, "content"); contentState != argMissing {
+			return ollama.Message{Role: "tool", Content: "error: edit_file takes new_text, not content. new_text is only the text that replaces old_text, not the whole file"}
+		}
+		return ollama.Message{Role: "tool", Content: "error: missing required parameter new_text: the replacement text for old_text"}
 	}
 
 	if !strings.Contains(newText, "\n") && strings.Contains(newText, `\n`) {

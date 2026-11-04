@@ -244,12 +244,11 @@ func TestEditFileHelper_DoesNotTruncateExistingFile(t *testing.T) {
 	}
 }
 
-// the replacement is sometimes sent as "content" instead of "new_text"
-// (llama3.1, baseline-2 add-bug-descriptive rows 26-29). both keys mean the
-// same thing, so the handler accepts either.
-func TestEditFileHelper_AcceptsContentAsNewText(t *testing.T) {
-	feedStdin(t, "y\n")
-
+// "content" is not an alias for new_text: models use it to mean "the whole file",
+// and applying that at a snippet site splices the file into itself (llama3.1,
+// baseline-3 rows 25-29 sent old_text "return a - b" plus the whole file). the
+// handler must refuse it and leave the file untouched.
+func TestEditFileHelper_RejectsContentAsNewText(t *testing.T) {
 	root := t.TempDir()
 	original := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
 	if err := os.WriteFile(filepath.Join(root, "add.go"), []byte(original), 0o644); err != nil {
@@ -261,23 +260,26 @@ func TestEditFileHelper_AcceptsContentAsNewText(t *testing.T) {
 			Name: "edit_file",
 			Arguments: map[string]any{
 				"path":     "add.go",
-				"old_text": "\treturn a - b\n",
-				"content":  "\treturn a + b\n",
+				"old_text": "return a - b",
+				"content":  "package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n",
 			},
 		},
 	}
 	result := editFileHelper(call, root)
-	if strings.HasPrefix(result.Content, "error") {
-		t.Fatalf("expected content to be accepted as new_text, got %q", result.Content)
+
+	if !strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected content to be rejected, got %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "new_text") {
+		t.Errorf("error = %q, want it to name new_text", result.Content)
 	}
 
 	got, err := os.ReadFile(filepath.Join(root, "add.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
-	if string(got) != want {
-		t.Errorf("file content = %q, want %q", got, want)
+	if string(got) != original {
+		t.Errorf("file was modified: %q", got)
 	}
 }
 
@@ -312,7 +314,7 @@ func TestEditFileHelper_DistinguishesMissingFromWrongType(t *testing.T) {
 		{
 			name: "new_text wrong type",
 			args: map[string]any{"path": "a.go", "old_text": "keep", "new_text": nil},
-			want: "new_text (or its alias content) must be a string",
+			want: "new_text must be a string",
 		},
 	}
 
