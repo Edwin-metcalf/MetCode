@@ -27,7 +27,7 @@ func List(dir string) ([]string, error) {
 	dirSlice, err := os.ReadDir(dir)
 
 	if errors.Is(err, os.ErrNotExist) {
-		return []string{}, err
+		return []string{}, nil
 
 	} else if err != nil {
 		return []string{}, err
