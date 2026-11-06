@@ -247,7 +247,7 @@ func TestResultJSONKeys(t *testing.T) {
 	want := []string{
 		"task", "model", "run_index", "num_ctx", "temperature", "prompt_hash", "git_commit",
 		"passed", "no_tools", "tampered", "ended", "edit_applied", "final_reply", "transcript",
-		"tool_calls", "tool_errors", "unnecessary_calls", "declined_commands",
+		"tool_calls", "tool_errors", "unnecessary_calls", "declined_commands", "grade_output",
 		"rounds", "prompt_tokens", "output_tokens", "wall_ms", "load_ms", "prefill_ms", "gen_ms",
 	}
 	for _, k := range want {

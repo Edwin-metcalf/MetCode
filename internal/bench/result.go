@@ -49,6 +49,7 @@ type Result struct {
 	ToolErrors       map[string]int `json:"tool_errors"`
 	UnnecessaryCalls int            `json:"unnecessary_calls"`
 	DeclinedCommands int            `json:"declined_commands"`
+	GradeOutput      string         `json:"grade_outpu"`
 
 	//cost from stats and timer
 	Rounds       int   `json:"rounds"`
@@ -236,7 +237,7 @@ func Run(task Task, cfg Config) (Result, error) {
 		Passed: grade.Passed, NoTools: task.NoTools, Tampered: grade.Tampered, Ended: ended, EditApplied: edited,
 		FinalReply: reply, Transcript: history[1:],
 		ToolCalls: calls, ToolErrors: errs,
-		UnnecessaryCalls: unnecessary, DeclinedCommands: declined,
+		UnnecessaryCalls: unnecessary, DeclinedCommands: declined, GradeOutput: grade.Output,
 		Rounds: stats.Rounds, PromptTokens: stats.PromptTokens, OutputTokens: stats.OutputTokens,
 		WallMS:    stats.WallTime.Milliseconds(),
 		LoadMS:    stats.LoadTime.Milliseconds(),
