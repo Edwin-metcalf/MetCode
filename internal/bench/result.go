@@ -49,7 +49,7 @@ type Result struct {
 	ToolErrors       map[string]int `json:"tool_errors"`
 	UnnecessaryCalls int            `json:"unnecessary_calls"`
 	DeclinedCommands int            `json:"declined_commands"`
-	GradeOutput      string         `json:"grade_outpu"`
+	GradeOutput      string         `json:"grade_output"`
 
 	//cost from stats and timer
 	Rounds       int   `json:"rounds"`

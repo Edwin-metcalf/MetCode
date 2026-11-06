@@ -59,6 +59,7 @@ func TestListModels_FailurePath(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
+
 // a sentinel error instead of a plain message.
 func TestChat_ClassifiesTransportFailures(t *testing.T) {
 	t.Run("unreachable", func(t *testing.T) {
