@@ -54,7 +54,11 @@ func (c *CLI) handleCommand(command string, history *[]ollama.Message) {
 }
 
 func (c *CLI) chooseModel() string {
-	models := ollama.ListModels(c.Agent.Host)
+	models, err := ollama.ListModels(c.Agent.Host)
+	if err != nil {
+		fmt.Println("error listing models:", err)
+		return c.Agent.Model
+	}
 	fmt.Println("Available models to choose from")
 
 	for idx, val := range models {
