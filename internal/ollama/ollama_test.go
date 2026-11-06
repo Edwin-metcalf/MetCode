@@ -48,7 +48,17 @@ func TestChat_SendsRequestAndDecodesToolCalls(t *testing.T) {
 	}
 }
 
-// bench has to tell a dead server from a slow one, so Chat marks each case with
+func TestListModels_FailurePath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	_, err := ListModels(srv.URL)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
 // a sentinel error instead of a plain message.
 func TestChat_ClassifiesTransportFailures(t *testing.T) {
 	t.Run("unreachable", func(t *testing.T) {

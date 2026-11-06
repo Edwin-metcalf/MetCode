@@ -132,7 +132,10 @@ func ListModels(host string) ([]string, error) {
 		return nil, fmt.Errorf("call to get ollama ls failed: %w", err)
 	}
 	defer resp.Body.Close()
-
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ollama returned %s: %s", resp.Status, msg)
+	}
 	var modelOutput modelWrapper
 	if err := json.NewDecoder(resp.Body).Decode(&modelOutput); err != nil {
 		return nil, fmt.Errorf("failed to get model output: %w", err)

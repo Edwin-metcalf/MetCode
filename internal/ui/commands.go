@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -57,7 +58,11 @@ func (c *CLI) chooseModel() string {
 	models, err := ollama.ListModels(c.Agent.Host)
 	if err != nil {
 		fmt.Println("error listing models:", err)
-		return c.Agent.Model
+		if c.Agent.Model != "" {
+			return c.Agent.Model
+		}
+		fmt.Println("no model available; exiting")
+		os.Exit(1)
 	}
 	fmt.Println("Available models to choose from")
 
