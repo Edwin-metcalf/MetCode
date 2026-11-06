@@ -124,12 +124,13 @@ func Chat(req ChatRequest, host string) (ChatResponse, error) {
 	return output, nil
 }
 
+// ListModels returns the names of the models the ollama server has available.
+// Failures are returned to the caller so it can decide how to recover.
 func ListModels(host string) ([]string, error) {
 	resp, err := http.Get(host + "/api/tags")
 	if err != nil {
 		return nil, fmt.Errorf("call to get ollama ls failed: %w", err)
 	}
-
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(resp.Body)
