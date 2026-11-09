@@ -1,0 +1,5 @@
+{
+  "prompt": "The tests in change-constant.go fail. Fix the bug in change-constant.go so the tests pass. Do not edit the test file. Use the tools as your disposal like read_file adn edit_file to fix the constant bug.",
+  "test_cmd": ["go", "test", "-timeout", "60s", "./..."],
+  "timeout_sec": 90
+}
