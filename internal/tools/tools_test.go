@@ -617,3 +617,68 @@ func TestUpdatePlanItemHelper_UnknownIDIsAFailure(t *testing.T) {
 		t.Errorf("plan should be untouched, got %+v", items)
 	}
 }
+
+func TestResolveSafePath_RejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	if err := os.WriteFile(
+		filepath.Join(outside, "secret.txt"),
+		[]byte("secret"),
+		0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	err := os.Symlink(outside, filepath.Join(root, "escape"))
+	if err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	_, err = resolveSafePath(root, "escape/secret.txt")
+	if err == nil {
+		t.Fatal("expected symlink escape to be rejected")
+	}
+}
+
+func TestResolveSafePath_RejectsBrokenSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	// the target does not exist, so EvalSymlinks reports ErrNotExist. A fallback
+	// to the parent would let edit_file create this file outside the root.
+	err := os.Symlink(
+		filepath.Join(outside, "missing"),
+		filepath.Join(root, "escape"),
+	)
+	if err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if _, err := resolveSafePath(root, "escape/new.txt"); err == nil {
+		t.Fatal("expected broken symlink escape to be rejected")
+	}
+}
+
+func TestResolveSafePath_AllowsSymlinkInsideRoot(t *testing.T) {
+	root := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(root, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(
+		filepath.Join(root, "real"),
+		filepath.Join(root, "alias"),
+	); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	got, err := resolveSafePath(root, "alias/file.txt")
+	if err != nil {
+		t.Fatalf("symlink inside root should be allowed: %v", err)
+	}
+	want := filepath.Join(root, "real", "file.txt")
+	if got != want {
+		t.Errorf("resolved path = %q, want %q", got, want)
+	}
+}
