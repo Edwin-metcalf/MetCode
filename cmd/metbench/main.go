@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Edwin-metcalf/MetCode/internal/bench"
+	"github.com/Edwin-metcalf/MetCode/internal/ollama"
 )
 
 func main() {
@@ -151,6 +152,7 @@ func runRun(args []string) int {
 	}
 
 	commit := gitCommit()
+	version := ollamaVersion(resolveHost(*host))
 	path := *out
 	if path == "" {
 		short := commit
@@ -174,7 +176,7 @@ func runRun(args []string) int {
 	defer f.Close()
 	fmt.Fprintf(os.Stderr, "writing results to %s\n", path)
 
-	mc := bench.MatrixConfig{Models: modelList, N: *n, Host: *host, GitCommit: commit}
+	mc := bench.MatrixConfig{Models: modelList, N: *n, Host: *host, GitCommit: commit, OllamaVersion: version}
 	progress := func(done, total int, r bench.Result) {
 		fmt.Fprintf(os.Stderr, "[%d/%d] %s %s #%d ended=%s passed=%v\n",
 			done, total, r.Model, r.Task, r.RunIndex, r.Ended, r.Passed)
@@ -209,6 +211,31 @@ func gitCommit() string {
 	}
 
 	return outString
+}
+
+// resolveHost applies the same fallback chain bench.Run uses: the -host flag,
+// then OLLAMA_HOST, then localhost. It is resolved here so the ollama version
+// is queried against the same server the runs will use.
+func resolveHost(host string) string {
+	if host == "" {
+		host = os.Getenv("OLLAMA_HOST")
+	}
+	if host == "" {
+		host = "http://localhost:11434"
+	}
+	return host
+}
+
+// ollamaVersion returns the ollama server version recorded in every results
+// row. Like gitCommit, a failed lookup is not fatal: it returns "unknown" so a
+// run can still proceed and be inspected later.
+func ollamaVersion(host string) string {
+	v, err := ollama.Version(host)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not get ollama version: %v\n", err)
+		return "unknown"
+	}
+	return v
 }
 
 func runReport(args []string) int {

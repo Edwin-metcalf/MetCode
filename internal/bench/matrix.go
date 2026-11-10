@@ -7,10 +7,11 @@ import (
 )
 
 type MatrixConfig struct {
-	Models    []string
-	N         int
-	Host      string
-	GitCommit string
+	Models        []string
+	N             int
+	Host          string
+	GitCommit     string
+	OllamaVersion string
 }
 
 // RunMatrix runs every model x task x repeat, writing one JSON line per run to w
@@ -26,7 +27,7 @@ func RunMatrix(tasks []Task, mc MatrixConfig, w io.Writer, progress func(done, t
 	for _, model := range mc.Models {
 		for _, task := range tasks {
 			for i := 0; i < mc.N; i++ {
-				res, err := Run(task, Config{Model: model, Host: mc.Host, RunIndex: i, GitCommit: mc.GitCommit})
+				res, err := Run(task, Config{Model: model, Host: mc.Host, RunIndex: i, GitCommit: mc.GitCommit, OllamaVersion: mc.OllamaVersion})
 				if err != nil {
 					return fmt.Errorf("%s / %s / run %d: %w", model, task.Name, i, err)
 				}

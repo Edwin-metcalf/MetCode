@@ -110,7 +110,7 @@ func newFakeOllama(t *testing.T, replies ...string) *fakeOllama {
 
 func runTask(t *testing.T, task Task, srv *fakeOllama) Result {
 	t.Helper()
-	res, err := Run(task, Config{Model: "fake-model", Host: srv.URL, RunIndex: 3, GitCommit: "abc123"})
+	res, err := Run(task, Config{Model: "fake-model", Host: srv.URL, RunIndex: 3, GitCommit: "abc123", OllamaVersion: "0.5.1"})
 	if err != nil {
 		t.Fatalf("Run returned a harness error: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestResultJSONKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"task", "model", "run_index", "num_ctx", "temperature", "prompt_hash", "git_commit",
+		"task", "model", "run_index", "num_ctx", "temperature", "prompt_hash", "git_commit", "ollama_version",
 		"passed", "no_tools", "tampered", "ended", "edit_applied", "final_reply", "transcript",
 		"tool_calls", "tool_errors", "unnecessary_calls", "declined_commands", "grade_output",
 		"rounds", "prompt_tokens", "output_tokens", "wall_ms", "load_ms", "prefill_ms", "gen_ms",
@@ -263,7 +263,7 @@ func TestResultJSONKeys(t *testing.T) {
 func TestResultJSONRoundTrip(t *testing.T) {
 	in := Result{
 		Task: "t", Model: "m", RunIndex: 2, NumCtx: 8192, Temperature: 0.2,
-		PromptHash: "h", GitCommit: "g",
+		PromptHash: "h", GitCommit: "g", OllamaVersion: "0.5.1",
 		Passed: true, NoTools: true, Tampered: true, Ended: "max_rounds", EditApplied: true,
 		ToolCalls: map[string]int{"read_file": 3}, ToolErrors: map[string]int{"edit_file": 1},
 		UnnecessaryCalls: 4, DeclinedCommands: 5,
@@ -327,6 +327,9 @@ func TestRun_RecordsIdentity(t *testing.T) {
 	sum := sha256.Sum256([]byte(prompt.Default()))
 	if res.Task != task.Name || res.Model != "fake-model" || res.RunIndex != 3 || res.GitCommit != "abc123" {
 		t.Errorf("identity fields wrong: %+v", res)
+	}
+	if res.OllamaVersion == "" || res.OllamaVersion != "0.5.1" {
+		t.Errorf("OllamaVersion = %q, want 0.5.1 from the config", res.OllamaVersion)
 	}
 	if res.NumCtx != agent.NumCTX || res.Temperature != agent.Temperature {
 		t.Errorf("numctx/temperature = %d/%v, want %d/%v", res.NumCtx, res.Temperature, agent.NumCTX, agent.Temperature)
