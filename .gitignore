@@ -13,3 +13,5 @@ coverage.out
 bench/results/*
 !bench/results/baseline-*.jsonl
 !bench/results/ablation-*.jsonl
+!bench/results/published
+!bench/results/published/**/*
