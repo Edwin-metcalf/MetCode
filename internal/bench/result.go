@@ -18,10 +18,11 @@ import (
 
 // config is what varies between runs
 type Config struct {
-	Model     string
-	Host      string
-	RunIndex  int
-	GitCommit string
+	Model         string
+	Host          string
+	RunIndex      int
+	GitCommit     string
+	OllamaVersion string
 }
 
 // big ol return
@@ -34,6 +35,9 @@ type Result struct {
 	Temperature float64 `json:"temperature"`
 	PromptHash  string  `json:"prompt_hash"` //sha256 the prompt.default
 	GitCommit   string  `json:"git_commit"`
+	// OllamaVersion is the ollama server version, queried once at the start of
+	// the run; it is the same for every row in a given run.
+	OllamaVersion string `json:"ollama_version"`
 
 	//outcome from Grade and the error Turn returned
 	Passed      bool             `json:"passed"`
@@ -233,7 +237,7 @@ func Run(task Task, cfg Config) (Result, error) {
 	return Result{
 		Task: task.Name, Model: cfg.Model, RunIndex: cfg.RunIndex,
 		NumCtx: agent.NumCTX, Temperature: agent.Temperature,
-		PromptHash: hex.EncodeToString(sum[:]), GitCommit: cfg.GitCommit,
+		PromptHash: hex.EncodeToString(sum[:]), GitCommit: cfg.GitCommit, OllamaVersion: cfg.OllamaVersion,
 		Passed: grade.Passed, NoTools: task.NoTools, Tampered: grade.Tampered, Ended: ended, EditApplied: edited,
 		FinalReply: reply, Transcript: history[1:],
 		ToolCalls: calls, ToolErrors: errs,

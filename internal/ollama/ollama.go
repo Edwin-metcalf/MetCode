@@ -94,6 +94,10 @@ type modelWrapper struct {
 	Models []models `json:"models"`
 }
 
+type version struct {
+	Version string `json:"version"`
+}
+
 func Chat(req ChatRequest, host string) (ChatResponse, error) {
 	// this is probably not needed but whatever
 	b, err := json.Marshal(req)
@@ -146,4 +150,24 @@ func ListModels(host string) ([]string, error) {
 		stringOutput[i] = modelOutput.Models[i].Name
 	}
 	return stringOutput, nil
+}
+
+// Version returns the ollama server's version string, e.g. "0.5.1". Like
+// ListModels, failures are returned to the caller so it can decide how to
+// recover.
+func Version(host string) (string, error) {
+	resp, err := http.Get(host + "/api/version")
+	if err != nil {
+		return "", fmt.Errorf("call to get ollama version failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("ollama returned %s: %s", resp.Status, msg)
+	}
+	var out version
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("failed to decode ollama version: %w", err)
+	}
+	return out.Version, nil
 }
