@@ -3,6 +3,7 @@ package bench
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -355,7 +356,7 @@ func TestFormatMarkdown_Cells(t *testing.T) {
 	want := map[string]string{
 		"Model": "m", "Task": "t", "N": "2", "Pass": "1/2",
 		"ok/max/fail/err": "2/0/0/0", "timeout/unreach": "0/0", "No-edit claims": "1", "Tampered": "0",
-		"Calls/run": "2.0", "Tool errors": "0", "Unnecessary/run": "-",
+		"Calls/run": "2.0", "Tool errors": "0", "Edit fails mal/anc/oth": "0/0/0", "Unnecessary/run": "-",
 		"Wall s (median, range)": "2.5 (2.0-3.0)", "Prompt tok/run": "1500",
 	}
 	for col, w := range want {
@@ -400,6 +401,44 @@ func TestFormatMarkdown_ShowsTransportFailures(t *testing.T) {
 	}
 }
 
+func TestFormatToolErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		in   map[string]int
+		want string
+	}{
+		{"no errors", nil, "0"},
+		{"only zero counts", map[string]int{"edit_file": 0}, "0"},
+		{"one tool", map[string]int{"edit_file": 20}, "20 (edit_file 20)"},
+		{"biggest first", map[string]int{"read_file": 6, "edit_file": 10}, "16 (edit_file 10, read_file 6)"},
+		{"ties by name", map[string]int{"read_file": 1, "echo": 1, "edit_file": 1}, "3 (echo 1, edit_file 1, read_file 1)"},
+		{"invented tool names stay verbatim", map[string]int{"write_file": 7, "echo": 1}, "8 (write_file 7, echo 1)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := formatToolErrors(tc.in); got != tc.want {
+				t.Errorf("formatToolErrors = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatMarkdown_ToolErrorBreakdown(t *testing.T) {
+	r := mkResult("m", "t", func(r *Result) {
+		r.ToolErrors = map[string]int{"edit_file": 10, "read_file": 6}
+	})
+	r.Transcript = editToolError(t, "error: file does not exist but old_text is not empty")
+
+	rows := parseTable(t, FormatMarkdown([]Group{{Model: "m", Task: "t", Rows: []Result{r}}}))
+
+	if got := rows[0]["Tool errors"]; got != "16 (edit_file 10, read_file 6)" {
+		t.Errorf("Tool errors = %q", got)
+	}
+	if got := rows[0]["Edit fails mal/anc/oth"]; got != "0/1/0" {
+		t.Errorf("Edit fails = %q, want 0/1/0", got)
+	}
+}
+
 func TestFormatMarkdown_OneRowPerGroupInOrder(t *testing.T) {
 	groups := GroupResults([]Result{
 		mkResult("m2", "a"), mkResult("m1", "b"), mkResult("m1", "a"),
@@ -413,5 +452,58 @@ func TestFormatMarkdown_OneRowPerGroupInOrder(t *testing.T) {
 	}
 	if want := []string{"m1/a", "m1/b", "m2/a"}; !slices.Equal(got, want) {
 		t.Errorf("rows = %v, want %v", got, want)
+	}
+}
+
+// ---------- golden ----------
+
+// firstDiffLine returns the 1-based number of the first line that differs
+// between got and want, with both lines. 0 means they are identical.
+func firstDiffLine(got, want string) (int, string, string) {
+	g, w := strings.Split(got, "\n"), strings.Split(want, "\n")
+	for i := 0; i < len(g) || i < len(w); i++ {
+		var gl, wl string
+		if i < len(g) {
+			gl = g[i]
+		}
+		if i < len(w) {
+			wl = w[i]
+		}
+		if gl != wl {
+			return i + 1, gl, wl
+		}
+	}
+	return 0, "", ""
+}
+
+// The published baseline is the contract: report must reproduce its table byte
+// for byte. A formatting change breaks this on purpose, so regenerate the table
+// in the same commit that changes the columns.
+func TestFormatMarkdown_PublishedBaselineGolden(t *testing.T) {
+	const (
+		jsonl = "../../bench/results/published/baseline/baseline.jsonl"
+		table = "../../bench/results/published/baseline/table.md"
+	)
+
+	f, err := os.Open(jsonl)
+	if err != nil {
+		t.Fatalf("opening the published baseline: %v", err)
+	}
+	rows, err := LoadResults(f)
+	f.Close()
+	if err != nil {
+		t.Fatalf("reading %s: %v", jsonl, err)
+	}
+
+	want, err := os.ReadFile(table)
+	if err != nil {
+		t.Fatalf("reading the golden table: %v", err)
+	}
+
+	got := FormatMarkdown(GroupResults(rows))
+
+	if line, gotLine, wantLine := firstDiffLine(got, string(want)); line != 0 {
+		t.Fatalf("table differs from %s at line %d:\n got %q\nwant %q\nregenerate with: go run ./cmd/metbench report %s > %s",
+			table, line, gotLine, wantLine, jsonl, table)
 	}
 }

@@ -21,6 +21,8 @@ type Stats struct {
 	Ended                                           map[string]int
 	MeanCalls, MeanUnnecessary, MeanPromptTokens    float64
 	ToolErrors                                      int
+	ToolErrorsByTool                                map[string]int
+	EditFails                                       map[string]int
 	WallMedianMS, WallMinMS, WallMaxMS              int64
 	NoTools                                         bool
 }
@@ -97,7 +99,12 @@ func median(xs []int64) int64 {
 }
 
 func (g Group) Stats() Stats {
-	s := Stats{N: len(g.Rows), Ended: map[string]int{}}
+	s := Stats{
+		N:                len(g.Rows),
+		Ended:            map[string]int{},
+		ToolErrorsByTool: map[string]int{},
+		EditFails:        map[string]int{},
+	}
 	if s.N == 0 {
 		return s
 	}
@@ -122,6 +129,12 @@ func (g Group) Stats() Stats {
 		s.Ended[r.Ended]++
 		calls += sumMap(r.ToolCalls)
 		s.ToolErrors += sumMap(r.ToolErrors)
+		for tool, n := range r.ToolErrors {
+			s.ToolErrorsByTool[tool] += n
+		}
+		for reason, n := range r.EditFails() {
+			s.EditFails[reason] += n
+		}
 		unnecessary += r.UnnecessaryCalls
 		promptTok += r.PromptTokens
 		walls = append(walls, r.WallMS-r.LoadMS)
@@ -178,10 +191,48 @@ func (g Group) Warnings() []string {
 
 func secs(ms int64) string { return fmt.Sprintf("%.1f", float64(ms)/1000) }
 
+// formatToolErrors is "total (tool count, ...)" listing only the tools that
+// errored, biggest first, ties by name so two reports of the same rows match.
+// Names are not filtered against the schema: a model calling a tool that does
+// not exist shows up here under whatever it invented.
+func formatToolErrors(byTool map[string]int) string {
+	total := sumMap(byTool)
+	if total == 0 {
+		return "0"
+	}
+
+	names := make([]string, 0, len(byTool))
+	for name, n := range byTool {
+		if n > 0 {
+			names = append(names, name)
+		}
+	}
+	slices.SortFunc(names, func(a, b string) int {
+		if byTool[a] != byTool[b] {
+			if byTool[a] > byTool[b] {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a, b)
+	})
+
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s %d", name, byTool[name]))
+	}
+	return fmt.Sprintf("%d (%s)", total, strings.Join(parts, ", "))
+}
+
+// formatEditFails is mal/anc/oth, the same shape as ok/max/fail/err.
+func formatEditFails(fails map[string]int) string {
+	return fmt.Sprintf("%d/%d/%d", fails[EditFailMalformed], fails[EditFailAnchor], fails[EditFailOther])
+}
+
 func FormatMarkdown(groups []Group) string {
 	var b strings.Builder
-	b.WriteString("| Model | Task | N | Pass | ok/max/fail/err | timeout/unreach | No-edit claims | Tampered | Calls/run | Tool errors | Unnecessary/run | Wall s (median, range) | Prompt tok/run |\n")
-	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("| Model | Task | N | Pass | ok/max/fail/err | timeout/unreach | No-edit claims | Tampered | Calls/run | Tool errors | Edit fails mal/anc/oth | Unnecessary/run | Wall s (median, range) | Prompt tok/run |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, g := range groups {
 		s := g.Stats()
 		pass := fmt.Sprintf("%d/%d", s.Passed, s.N)
@@ -191,12 +242,12 @@ func FormatMarkdown(groups []Group) string {
 			pass, noEdit = "n/a", "n/a"
 			unnecessary = fmt.Sprintf("%.1f", s.MeanUnnecessary)
 		}
-		fmt.Fprintf(&b, "| %s | %s | %d | %s | %d/%d/%d/%d | %d/%d | %s | %d | %.1f | %d | %s | %s (%s-%s) | %.0f |\n",
+		fmt.Fprintf(&b, "| %s | %s | %d | %s | %d/%d/%d/%d | %d/%d | %s | %d | %.1f | %s | %s | %s | %s (%s-%s) | %.0f |\n",
 			g.Model, g.Task, s.N, pass,
 			s.Ended["ok"], s.Ended["max_rounds"], s.Ended["too_many_failures"], s.Ended["model_error"],
 			s.Ended["timeout"], s.Ended["server_unreachable"],
-			noEdit, s.Tampered, s.MeanCalls, s.ToolErrors, unnecessary,
-			secs(s.WallMedianMS), secs(s.WallMinMS), secs(s.WallMaxMS), s.MeanPromptTokens)
+			noEdit, s.Tampered, s.MeanCalls, formatToolErrors(s.ToolErrorsByTool), formatEditFails(s.EditFails),
+			unnecessary, secs(s.WallMedianMS), secs(s.WallMinMS), secs(s.WallMaxMS), s.MeanPromptTokens)
 	}
 	return b.String()
 }

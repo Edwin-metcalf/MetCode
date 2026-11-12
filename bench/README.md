@@ -81,7 +81,8 @@ One row per (model, task), sorted by model then task.
 | No-edit claims | rows that ended `ok` and left the workspace byte for byte unchanged. The model said it was done and did nothing. This is the most useful column for "it talks but does not act". `n/a` for `no_tools` |
 | Tampered | rows where a fixture test file was edited or deleted. Never a pass |
 | Calls/run | mean tool calls per run |
-| Tool errors | total tool errors in the group. A sum, not a mean, so it grows with N |
+| Tool errors | total tool errors in the group, then the same number broken out per tool: `16 (edit_file 10, read_file 6)`. A sum, not a mean, so it grows with N. Only tools that errored are listed, biggest first. A name that is not in the tool schema (`write_file`, `echo`) is the model inventing a tool, which reads as a parse failure rather than a tool failure |
+| Edit fails mal/anc/oth | `edit_file` failures split by why the call failed, in the same shape as `ok/max/fail/err`. `mal` is the call being the wrong shape (missing `old_text`, `content` sent instead of `new_text`, a literal `\n`). `anc` is the call pointing at text or a file that is not there (`old_text not found`, `matches multiple locations`, `file does not exist but old_text is not empty`). `oth` is refused or io: a protected file, a path outside the root, a read/write error, or wording this classifier does not know yet. A rising `oth` means the error strings in `internal/tools/files.go` changed, not that the models got worse. The three numbers add up to the `edit_file` part of Tool errors. The split is derived from the transcript when the report runs, so old results files get it without a rerun |
 | Unnecessary/run | for a `no_tools` task, mean calls made when none were needed. `-` for graded tasks |
 | Wall s (median, range) | wall time of the turn with model load subtracted, so prefill + generation + network + tool time. Median and min-max rather than mean: at N=5 one cold start or a network blip moves a mean a lot. The raw `wall_ms` and `load_ms` are both in the JSONL |
 | Prompt tok/run | mean prompt tokens per run, the cost side of the turn |
@@ -135,6 +136,11 @@ Publish a run as `bench/results/studies/<name>/` with three files: the `runs.jso
 ```bash
 go run ./cmd/metbench report bench/results/studies/<name>/runs.jsonl > bench/results/studies/<name>/table.md
 ```
+
+The published table at `bench/results/published/baseline/table.md` is pinned by a golden test
+(`TestFormatMarkdown_PublishedBaselineGolden`), so changing the column layout fails `go test` until you
+regenerate that table in the same commit. Regenerating the table is the only thing the test asks for:
+the JSONL is the data, the table is the view.
 
 Heads up: `.gitignore` currently ignores `bench/results/*` and only un-ignores top level `baseline-*.jsonl` and `ablation-*.jsonl`. A study under `bench/results/studies/` is ignored along with everything else, so add a rule for it before you try to commit one, or `git status` will look clean when it is not. 
 
