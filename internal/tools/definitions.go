@@ -5,7 +5,8 @@ import (
 )
 
 var All = []ollama.Tool{
-	// this is global(package level) dont edit could be risky just copy if needed
+	// this is global(package level) dont edited it in runtime if wanting to add more tools
+	//make a copy and use that instead
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
@@ -22,7 +23,7 @@ var All = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "read_file",
-			Description: "reads the context of a file and returns it as plain text. Use when the user asks about context of a file or wants you to refer to code/text from a file that is not in the conversation.",
+			Description: "reads the contents of a file and returns it as plain text. Use when the user asks about context of a file or wants you to refer to code/text from a file that is not in the conversation.",
 			Parameters: ollama.Parameters{
 				Type:     "object",
 				Required: []string{"path"},
@@ -45,7 +46,7 @@ var All = []ollama.Tool{
 			// schema stays the canonical contract and the handler error is the
 			// teaching channel for models that send the wrong key.
 			Name:        "edit_file",
-			Description: "Edit an existing file by replacing old_text with new_text. To create a new file, pass an empty old_text and put the entire file contents in new_text. old_text must match the file exactly and appear only once. Call read_file first and copy it from the real content.",
+			Description: "Edit an existing file by replacing old_text with new_text. To create a new file, pass an empty old_text and put the entire file contents in new_text. old_text must match the file exactly and appear only once. Call read_file first and copy old_text exactly from its output.",
 			Parameters: ollama.Parameters{
 				Type:     "object",
 				Required: []string{"path", "old_text", "new_text"},
