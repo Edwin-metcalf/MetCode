@@ -176,6 +176,12 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 
 func createFileHelper(path string, newText string) ollama.Message {
 	//helper to create a file if edit file is called on a file that does not exist
+
+	//check again if the file has been edited since
+	if _, err := os.Lstat(path); err == nil {
+		return ollama.Message{Role: "tool", Content: "error: file already exists. Call read_file and make an edit against its current contents"}
+	}
+
 	printLoud("----- proposed change to new file: ", path, "------")
 	printLoud(prefixLines(newText, "+ "))
 	printLoud("------------------------------")
@@ -190,8 +196,22 @@ func createFileHelper(path string, newText string) ollama.Message {
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error creating directory %v", err)}
 	}
 
-	err := os.WriteFile(path, []byte(newText), 0o644)
+	// O_excl open fails if the user manual creates while confirming is waiting
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+
+	if errors.Is(err, fs.ErrExist) {
+		return ollama.Message{Role: "tool", Content: "error: file was created after the edit was proposed; nothing was written. Call read_file and make an edit against its current contents"}
+	}
+
 	if err != nil {
+		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
+	}
+	if _, err := f.WriteString(newText); err != nil {
+		f.Close()
+		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
+	}
+
+	if err := f.Close(); err != nil {
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
 	}
 
