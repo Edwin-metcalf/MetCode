@@ -118,11 +118,13 @@ func runRun(args []string) int {
 	}
 	if *n < 1 {
 		fmt.Fprintln(os.Stderr, "-n must be at least 1")
+		return 2
 	}
 
 	tasks, err := bench.LoadTasks(*taskDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Loading tasks: %v\n", err)
+		return 1
 	}
 
 	if *taskName != "" {
