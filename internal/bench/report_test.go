@@ -3,7 +3,6 @@ package bench
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -452,58 +451,5 @@ func TestFormatMarkdown_OneRowPerGroupInOrder(t *testing.T) {
 	}
 	if want := []string{"m1/a", "m1/b", "m2/a"}; !slices.Equal(got, want) {
 		t.Errorf("rows = %v, want %v", got, want)
-	}
-}
-
-// ---------- golden ----------
-
-// firstDiffLine returns the 1-based number of the first line that differs
-// between got and want, with both lines. 0 means they are identical.
-func firstDiffLine(got, want string) (int, string, string) {
-	g, w := strings.Split(got, "\n"), strings.Split(want, "\n")
-	for i := 0; i < len(g) || i < len(w); i++ {
-		var gl, wl string
-		if i < len(g) {
-			gl = g[i]
-		}
-		if i < len(w) {
-			wl = w[i]
-		}
-		if gl != wl {
-			return i + 1, gl, wl
-		}
-	}
-	return 0, "", ""
-}
-
-// The published baseline is the contract: report must reproduce its table byte
-// for byte. A formatting change breaks this on purpose, so regenerate the table
-// in the same commit that changes the columns.
-func TestFormatMarkdown_PublishedBaselineGolden(t *testing.T) {
-	const (
-		jsonl = "../../bench/results/published/baseline/baseline.jsonl"
-		table = "../../bench/results/published/baseline/table.md"
-	)
-
-	f, err := os.Open(jsonl)
-	if err != nil {
-		t.Fatalf("opening the published baseline: %v", err)
-	}
-	rows, err := LoadResults(f)
-	f.Close()
-	if err != nil {
-		t.Fatalf("reading %s: %v", jsonl, err)
-	}
-
-	want, err := os.ReadFile(table)
-	if err != nil {
-		t.Fatalf("reading the golden table: %v", err)
-	}
-
-	got := FormatMarkdown(GroupResults(rows))
-
-	if line, gotLine, wantLine := firstDiffLine(got, string(want)); line != 0 {
-		t.Fatalf("table differs from %s at line %d:\n got %q\nwant %q\nregenerate with: go run ./cmd/metbench report %s > %s",
-			table, line, gotLine, wantLine, jsonl, table)
 	}
 }

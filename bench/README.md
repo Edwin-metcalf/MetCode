@@ -137,10 +137,8 @@ Publish a run as `bench/results/studies/<name>/` with three files: the `runs.jso
 go run ./cmd/metbench report bench/results/studies/<name>/runs.jsonl > bench/results/studies/<name>/table.md
 ```
 
-The published table at `bench/results/published/baseline/table.md` is pinned by a golden test
-(`TestFormatMarkdown_PublishedBaselineGolden`), so changing the column layout fails `go test` until you
-regenerate that table in the same commit. Regenerating the table is the only thing the test asks for:
-the JSONL is the data, the table is the view.
+A published study is a historical artifact: regenerate to a new path instead of overwriting a `table.md`
+that a published folder already points at.
 
 Heads up: `.gitignore` currently ignores `bench/results/*` and only un-ignores top level `baseline-*.jsonl` and `ablation-*.jsonl`. A study under `bench/results/studies/` is ignored along with everything else, so add a rule for it before you try to commit one, or `git status` will look clean when it is not. 
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
+	"github.com/Edwin-metcalf/MetCode/internal/tools"
 )
 
 // helper type to normalize wierd tool calls
@@ -20,11 +21,35 @@ type rawCall struct {
 	} `json:"function"`
 }
 
+// toolAliases maps names models invent to the canonical tools.All name
+var toolAliases = map[string]string{
+	"create_file": "edit_file",
+	"update_file": "edit_file",
+	"write_file":  "edit_file",
+}
+
+// resolveToolName follows an alias and reports whether the result is a real tool.
+func resolveToolName(name string) (string, bool) {
+	if canon, ok := toolAliases[name]; ok {
+		name = canon
+	}
+	for _, t := range tools.All {
+		if t.Function.Name == name {
+			return name, true
+		}
+	}
+
+	return name, false
+}
+
 func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 	//right now only four cases but might have more possibly expand to more helpers in that case
 	//future case if the user is actually asking for a json that hs {"name": "example"} it will try to tool call it
 	//new hase ```json just saw
 
+	// aliases are only applied to calls recovered from content. A real tool_call
+	// from Ollama returns here untouched, so a server-native write_file still
+	// reaches Handle as an unknown tool.
 	if len(m.ToolCalls) > 0 {
 		return m
 	}
@@ -59,7 +84,7 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 	// firstCallOnly's one-call-per-message rule.
 	var rawData rawCall
 	if err := json.NewDecoder(strings.NewReader(stripped[start:])).Decode(&rawData); err != nil {
-		if !a.Quiet {
+		if !a.Quiet && strings.HasPrefix(stripped, "{") {
 			fmt.Printf("error unmarshaling tool call: %v\n", err)
 		}
 		return m
@@ -85,6 +110,14 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 	if name == "" {
 		return m
 	}
+	canon, known := resolveToolName(name)
+
+	// an unknown name with no arguments is more likely a plain json reply
+	// than a call, so leave it as content.
+	if !known && args == nil {
+		return m
+	}
+	name = canon
 
 	return ollama.Message{Role: m.Role, Content: "", ToolCalls: []ollama.ToolCall{{Function: ollama.CalledFunction{Name: name, Arguments: args}}}}
 
