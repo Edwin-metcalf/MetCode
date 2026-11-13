@@ -42,14 +42,27 @@ func resolveToolName(name string) (string, bool) {
 	return name, false
 }
 
+// canonicalizeNativeCalls rewrites alias names on a real tool_calls response.
+// normalizeMessage only recovers calls written as plain text, so without this a
+// server-native write_file would reach Handle as an unknown tool. Unknown names
+// are left alone and still fail through the default case.
+func canonicalizeNativeCalls(m ollama.Message) ollama.Message {
+	for i := range m.ToolCalls {
+		if canon, ok := resolveToolName(m.ToolCalls[i].Function.Name); ok {
+			m.ToolCalls[i].Function.Name = canon
+		}
+	}
+	return m
+}
+
 func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 	//right now only four cases but might have more possibly expand to more helpers in that case
 	//future case if the user is actually asking for a json that hs {"name": "example"} it will try to tool call it
 	//new hase ```json just saw
 
-	// aliases are only applied to calls recovered from content. A real tool_call
-	// from Ollama returns here untouched, so a server-native write_file still
-	// reaches Handle as an unknown tool.
+	// Real tool_calls are canonicalized by canonicalizeNativeCalls in the agent
+	// loop before this runs. This function only recovers calls the model wrote
+	// as plain text.
 	if len(m.ToolCalls) > 0 {
 		return m
 	}

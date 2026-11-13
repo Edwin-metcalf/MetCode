@@ -21,7 +21,11 @@ var editFailMarkers = []struct{ marker, reason string }{
 	{"missing required parameter new_text", EditFailMalformed},
 	{"old_text must be a string", EditFailMalformed},
 	{"new_text must be a string", EditFailMalformed},
+	{"content must be a string", EditFailMalformed},
 	{"edit_file takes new_text, not content", EditFailMalformed},
+	{"edit_file takes new_text, not text", EditFailMalformed},
+	{"content is not valid Go", EditFailMalformed},
+	{"content is empty", EditFailMalformed},
 	{"instead of real line breaks", EditFailMalformed},
 	{"no path provided", EditFailMalformed},
 

@@ -283,6 +283,176 @@ func TestEditFileHelper_RejectsContentAsNewText(t *testing.T) {
 	}
 }
 
+// the shape small models actually send: path plus the whole file. a complete Go
+// file must replace the target instead of being rejected for a missing anchor.
+func TestEditFileHelper_ContentReplacesWholeFile(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	path := filepath.Join(root, "add.go")
+	original := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fixed := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "add.go", "content": fixed},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected a whole-file write, got %q", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != fixed {
+		t.Errorf("file = %q, want %q", got, fixed)
+	}
+}
+
+// a fragment is not a whole file: writing it would delete the package clause
+// and every other function, so it must be refused.
+func TestEditFileHelper_ContentFragmentIsRejected(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "add.go")
+	original := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "add.go", "content": "return a + b"},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if !strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("a fragment must not be written, got %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "not valid Go") {
+		t.Errorf("error = %q, want it to explain content is not a whole file", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Errorf("file was modified: %q", got)
+	}
+}
+
+func TestEditFileHelper_ContentCreatesMissingFile(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	content := "package sub\n"
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "sub/new.go", "content": content},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected the file to be created, got %q", result.Content)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "sub", "new.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != content {
+		t.Errorf("file = %q, want %q", got, content)
+	}
+}
+
+// models also use "text" for the whole file; it must take the same path.
+func TestEditFileHelper_TextIsWholeFile(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	content := "hello\n"
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "notes.txt", "text": content},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected text to be accepted as a whole file, got %q", result.Content)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "notes.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != content {
+		t.Errorf("file = %q, want %q", got, content)
+	}
+}
+
+// replacing an existing file with nothing is never intended, so it is refused.
+func TestEditFileHelper_ContentEmptyOverExistingFileIsRejected(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	original := "keep me\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "notes.txt", "content": ""},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if !strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected an empty content to be refused, got %q", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Errorf("file was modified: %q", got)
+	}
+}
+
+// a call with no payload at all must explain both shapes, not just old_text.
+func TestEditFileHelper_MissingPayloadNamesBothModes(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "a.go")
+	if err := os.WriteFile(path, []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{Name: "edit_file", Arguments: map[string]any{"path": "a.go"}},
+	}
+	result := editFileHelper(call, root)
+
+	if !strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected an error, got %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "missing required parameter old_text") {
+		t.Errorf("error should keep the old_text marker, got %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "content") {
+		t.Errorf("error should name the whole-file mode, got %q", result.Content)
+	}
+}
+
 // a missing key and a key sent with the wrong JSON type are different mistakes,
 // so the model has to be told which one it made.
 func TestEditFileHelper_DistinguishesMissingFromWrongType(t *testing.T) {

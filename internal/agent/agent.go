@@ -155,6 +155,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 	logCall(stats, resp, a.Quiet)
 
 	resp.Message = firstCallOnly(resp.Message)
+	resp.Message = canonicalizeNativeCalls(resp.Message)
 	resp.Message = a.normalizeMessage(resp.Message)
 	*history = append(*history, resp.Message)
 
@@ -194,6 +195,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 
 		logCall(stats, resp, a.Quiet)
 		resp.Message = firstCallOnly(resp.Message)
+		resp.Message = canonicalizeNativeCalls(resp.Message)
 		resp.Message = a.normalizeMessage(resp.Message)
 		*history = append(*history, resp.Message)
 	}

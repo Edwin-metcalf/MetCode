@@ -358,3 +358,41 @@ func TestNormalizeMessage_RecoversFencedCalls(t *testing.T) {
 		})
 	}
 }
+
+// A server-native call never goes through normalizeMessage, so the alias has to
+// be resolved separately or write_file reaches Handle as an unknown tool.
+func TestCanonicalizeNativeCalls(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"write_file alias", "write_file", "edit_file"},
+		{"create_file alias", "create_file", "edit_file"},
+		{"update_file alias", "update_file", "edit_file"},
+		{"real tool untouched", "read_file", "read_file"},
+		{"unknown name untouched", "echo", "echo"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := map[string]any{"path": "a.go", "content": "package fixture\n"}
+			got := canonicalizeNativeCalls(ollama.Message{
+				Role: "assistant",
+				ToolCalls: []ollama.ToolCall{{Function: ollama.CalledFunction{
+					Name: tt.in, Arguments: args,
+				}}},
+			})
+
+			if len(got.ToolCalls) != 1 {
+				t.Fatalf("got %d tool calls, want 1", len(got.ToolCalls))
+			}
+			if got.ToolCalls[0].Function.Name != tt.want {
+				t.Errorf("name = %q, want %q", got.ToolCalls[0].Function.Name, tt.want)
+			}
+			if !reflect.DeepEqual(got.ToolCalls[0].Function.Arguments, args) {
+				t.Errorf("arguments = %#v, want %#v", got.ToolCalls[0].Function.Arguments, args)
+			}
+		})
+	}
+}
