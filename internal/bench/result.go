@@ -215,7 +215,9 @@ func Run(task Task, cfg Config) (Result, error) {
 	}
 
 	var grade Grade
-	if !task.NoTools {
+	if task.NoTools {
+		grade = GradeNoTools(task, stats.Rounds, reply)
+	} else {
 		grade, err = GradeWorkspace(task, workDir)
 		if err != nil {
 			return Result{}, err

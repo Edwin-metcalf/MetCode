@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -48,6 +49,15 @@ func GradeWorkspace(task Task, workspace string) (Grade, error) {
 	g.Output = output
 
 	return g, nil
+}
+
+// an alternative to grade workspace that grades a no tools request checking if there were unesecary tool calls
+func GradeNoTools(task Task, rounds int, reply string) Grade {
+	g := Grade{Passed: rounds == 0 && strings.TrimSpace(reply) != ""}
+	if rounds > 0 {
+		g.Output = fmt.Sprintf("made %d tool round(s) on a task that needed none", rounds)
+	}
+	return g
 }
 
 // helper that reports wether any test file the fixture ships with is mising or changed

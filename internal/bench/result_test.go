@@ -459,15 +459,39 @@ func TestRun_IsQuiet(t *testing.T) {
 	}
 }
 
-func TestRun_NoToolsTaskIsNotGraded(t *testing.T) {
+func TestRun_NoToolsTaskPassesOnPlainReply(t *testing.T) {
 	task := loadTask(t, "greeting", `{"prompt": "Say hi.", "no_tools": true}`,
 		map[string]string{"notes.txt": "scratch"})
 	srv := newFakeOllama(t, textReply("hi!"))
 
 	res := runTask(t, task, srv)
 
-	if res.Ended != "ok" || !res.NoTools || res.Passed || res.UnnecessaryCalls != 0 || res.EditApplied {
-		t.Errorf("unexpected result for a polite no_tools run: %+v", res)
+	if res.Ended != "ok" || !res.NoTools {
+		t.Fatalf("unexpected run state: %+v", res)
+	}
+	if !res.Passed {
+		t.Errorf("a plain reply on a no_tools task should pass: %+v", res)
+	}
+	if res.UnnecessaryCalls != 0 || res.EditApplied {
+		t.Errorf("no tool use expected on a plain reply: %+v", res)
+	}
+}
+
+func TestRun_NoToolsTaskFailsOnToolCall(t *testing.T) {
+	task := loadTask(t, "greeting", `{"prompt": "Say hi.", "no_tools": true}`,
+		map[string]string{"notes.txt": "scratch"})
+	srv := newFakeOllama(t,
+		toolReply("read_file", map[string]any{"path": "notes.txt"}),
+		textReply("hi!"),
+	)
+
+	res := runTask(t, task, srv)
+
+	if res.Passed {
+		t.Errorf("a no_tools task that called a tool must fail: %+v", res)
+	}
+	if res.UnnecessaryCalls == 0 {
+		t.Errorf("the tool call should be counted as unnecessary: %+v", res)
 	}
 }
 

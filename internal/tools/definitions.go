@@ -57,7 +57,7 @@ var All = []ollama.Tool{
 					},
 					"old_text": map[string]any{
 						"type":        "string",
-						"description": "The exact text to replace, including whitespace. Must appear exactly once. For a new file, use an empty string '' and new_text becomes the whole file.",
+						"description": "The exact text to replace, copied from read_file output. Keep indentation exactly as shown, including tabs. Must appear exactly once in the file. Use an empty string only when creating a file that does not exist yet.",
 					},
 					"new_text": map[string]any{
 						"type":        "string",

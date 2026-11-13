@@ -3,6 +3,7 @@ package tools
 import (
 	"errors"
 	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,14 +148,38 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	fileContent := string(fileContentBytes)
 	count := strings.Count(fileContent, oldText)
 
-	if count == 0 {
-		return ollama.Message{Role: "tool", Content: "error: old_text not found in file. Call read_file and copy old_text exactly from its output, including indentation. Use a short unique snippet."}
-	}
-	if count > 1 {
+	var newContent string
+	switch {
+	case count > 1:
 		return ollama.Message{Role: "tool", Content: "error: old_text matches multiple locations (or is empty but the file is not). Include more surrounding lines so it matches exactly once."}
+	case count == 1:
+		newContent = strings.Replace(fileContent, oldText, newText, 1)
+	default:
+		// exact match failed, so try again ignoring indentation
+		if looksLikeToolCall(oldText) {
+			return ollama.Message{Role: "tool", Content: "error: old_text looks like a function call. old_text must be text copied from read_file output, not a tool call."}
+		}
+		start, end, err := findLooseMatch(fileContent, oldText)
+		if err != nil {
+			return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: old_text not found in file (%v). Call read_file and copy old_text exactly from its output. Use a short unique snippet.", err)}
+		}
+		region := fileContent[start:end]
+		newText = reindentLike(newText, region)
+		if strings.HasSuffix(region, "\n") && newText != "" && !strings.HasSuffix(newText, "\n") {
+			newText += "\n"
+		}
+		newContent = fileContent[:start] + newText + fileContent[end:]
 	}
 
-	newContent := strings.Replace(fileContent, oldText, newText, 1)
+	// Reject an edit that breaks a Go file which parsed before the edit.
+	// Files that were already broken are not blocked, so they can still be fixed.
+	if strings.HasSuffix(path, ".go") {
+		_, origErr := format.Source(fileContentBytes)
+		_, newErr := format.Source([]byte(newContent))
+		if origErr == nil && newErr != nil {
+			return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: this edit would make %s invalid Go (%v). The edit was not applied. Fix new_text and retry.", filepath.Base(path), newErr)}
+		}
+	}
 
 	printLoud("----- proposed change to ", path, "------")
 	printLoud(prefixLines(oldText, "- "))
