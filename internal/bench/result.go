@@ -53,6 +53,7 @@ type Result struct {
 
 	//cost from stats and timer
 	Rounds       int   `json:"rounds"`
+	Nudges       int   `json:"nudges"` //turns where the no-edit nudge fired
 	PromptTokens int   `json:"prompt_tokens"`
 	OutputTokens int   `json:"output_tokens"`
 	WallMS       int64 `json:"wall_ms"`    //whole turn: load + prefill + generation + tool time
@@ -184,6 +185,10 @@ func Run(task Task, cfg Config) (Result, error) {
 
 	var stats agent.TurnStats
 	a := agent.Agent{Model: cfg.Model, Host: host, Root: workDir, Quiet: true, Stats: func(s agent.TurnStats) { stats = s }}
+	// every tool task in the bench asks for a code change, so a turn that ends
+	// without one gets the single no-edit nudge. no_tools tasks (greeting) are
+	// excluded, or the nudge would turn a correct plain answer into a failure.
+	a.ExpectEdit = !task.NoTools
 
 	sys := prompt.Default()
 	history := []ollama.Message{{Role: "system", Content: sys}}
@@ -240,7 +245,8 @@ func Run(task Task, cfg Config) (Result, error) {
 		FinalReply: reply, Transcript: history[1:],
 		ToolCalls: calls, ToolErrors: errs,
 		UnnecessaryCalls: unnecessary, DeclinedCommands: declined, GradeOutput: grade.Output,
-		Rounds: stats.Rounds, PromptTokens: stats.PromptTokens, OutputTokens: stats.OutputTokens,
+		Rounds: stats.Rounds, Nudges: stats.Nudges,
+		PromptTokens: stats.PromptTokens, OutputTokens: stats.OutputTokens,
 		WallMS:    stats.WallTime.Milliseconds(),
 		LoadMS:    stats.LoadTime.Milliseconds(),
 		PrefillMS: stats.PrefillTime.Milliseconds(),
