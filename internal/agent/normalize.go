@@ -67,8 +67,12 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 		return m
 	}
 
-	stripped := stripCodeFence(strings.TrimSpace(m.Content))
+	content := strings.TrimSpace(m.Content)
 
+	// A <tool_call> wrapper is not a JSON object, so it is unwrapped by tag.
+	// stripCodeFence is only kept for this branch: the tag may sit inside a
+	// ```json block.
+	stripped := stripCodeFence(content)
 	if strings.HasPrefix(stripped, "<tool_call>") {
 		noTagString := strings.TrimPrefix(stripped, "<tool_call>")
 		noTagString = strings.TrimSuffix(noTagString, "</tool_call>")
@@ -78,62 +82,82 @@ func (a *Agent) normalizeMessage(m ollama.Message) ollama.Message {
 		return a.normalizeMessage(noPrefixMessage)
 	}
 
-	// find the first '{' and decode from there instead of requiring the message
-	// to start with one. Two shapes from baseline-2 needed this:
-	//   - a sentence of reasoning, then the call (add-bug rows 1-4)
-	//   - two calls written back to back (add-bug-descriptive rows 5, 6, 9)
-	// Index returns -1 when there is no brace at all, which is the "nothing to
-	// parse" case — note that is the opposite of what `curlyIdx == 0` tested:
-	// 0 means the message starts with '{', i.e. the ordinary case.
-	start := strings.Index(stripped, "{")
-	if start < 0 {
-		return m
-	}
-
-	// Decode reads exactly one JSON value and leaves the rest of the reader
-	// alone. That is the whole difference from json.Unmarshal, which decodes the
-	// entire string and failed with "Extra data: line 3 column 1" as soon as a
-	// second call followed the first. We keep only the first call, which matches
-	// firstCallOnly's one-call-per-message rule.
-	var rawData rawCall
-	if err := json.NewDecoder(strings.NewReader(stripped[start:])).Decode(&rawData); err != nil {
-		if !a.Quiet && strings.HasPrefix(stripped, "{") {
-			fmt.Printf("error unmarshaling tool call: %v\n", err)
+	rawData, ok := findCall(content)
+	if !ok {
+		// only complain about a message that tried to be a call, so prose and
+		// plain json replies stay quiet
+		if !a.Quiet && strings.HasPrefix(content, "{") && strings.Contains(content, `"name"`) {
+			fmt.Println("error unmarshaling tool call: no tool call found in the message")
 		}
 		return m
 	}
 
-	name, args := "", map[string]any(nil)
-
-	if rawData.Function != nil {
-		name = rawData.Function.Name
-		args = rawData.Function.Arguments
-		if args == nil {
-			args = rawData.Function.Parameters
-		}
-	} else {
-		name = rawData.Name
-		args = rawData.Arguments
-
-		if args == nil {
-			args = rawData.Parameters
-		}
-	}
-
-	if name == "" {
-		return m
-	}
-	canon, known := resolveToolName(name)
-
-	// an unknown name with no arguments is more likely a plain json reply
-	// than a call, so leave it as content.
-	if !known && args == nil {
-		return m
-	}
-	name = canon
+	name, args := rawData.nameAndArgs()
+	name, _ = resolveToolName(name)
 
 	return ollama.Message{Role: m.Role, Content: "", ToolCalls: []ollama.ToolCall{{Function: ollama.CalledFunction{Name: name, Arguments: args}}}}
 
+}
+
+// findCall returns the first tool call the model wrote as plain text. It tries
+// every '{' in the message, not just the first one, because models paste the
+// finished code before the call: in the withNudge study 10 of qwen2.5-coder's
+// 21 zero-edit runs had a complete edit_file call behind a ```go block, and
+// "the first brace" landed on a Go function body instead. Same reason
+// "the first fence" was wrong — see stripCodeFence.
+//
+// A known tool name wins over an earlier unknown one, so a map literal such as
+// map[string]string{"name": "x"} in pasted code cannot shadow the real call.
+func findCall(s string) (rawCall, bool) {
+	var fallback rawCall
+	haveFallback := false
+
+	for pos := 0; ; {
+		i := strings.Index(s[pos:], "{")
+		if i < 0 {
+			return fallback, haveFallback
+		}
+		i += pos
+		pos = i + 1
+
+		// Decode reads one JSON value and leaves the rest of the reader alone.
+		// That is the difference from json.Unmarshal, which failed with
+		// "Extra data" as soon as a second call followed the first. Go code
+		// fails on its first token, so the per-brace retry is cheap.
+		var raw rawCall
+		if err := json.NewDecoder(strings.NewReader(s[i:])).Decode(&raw); err != nil {
+			continue
+		}
+		name, args := raw.nameAndArgs()
+		if name == "" {
+			continue
+		}
+		if _, known := resolveToolName(name); known {
+			return raw, true
+		}
+		// an unknown name with arguments is still a call: Turn routes it to
+		// Handle so the model gets "unknown tool" back and can correct itself.
+		// one without arguments is more likely a plain json reply than a call
+		if args != nil && !haveFallback {
+			fallback, haveFallback = raw, true
+		}
+	}
+}
+
+// nameAndArgs reads the two shapes a text call comes in: {name, arguments} and
+// {function: {name, arguments}}. "parameters" is accepted for both, because
+// llama3.1 reaches for the schema's word instead of the call's word.
+func (r rawCall) nameAndArgs() (string, map[string]any) {
+	if r.Function != nil {
+		if r.Function.Arguments != nil {
+			return r.Function.Name, r.Function.Arguments
+		}
+		return r.Function.Name, r.Function.Parameters
+	}
+	if r.Arguments != nil {
+		return r.Name, r.Arguments
+	}
+	return r.Name, r.Parameters
 }
 
 // stripCodeFence removes a markdown code fence wrapped around content: the

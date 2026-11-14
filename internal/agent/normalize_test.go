@@ -359,6 +359,98 @@ func TestNormalizeMessage_RecoversFencedCalls(t *testing.T) {
 	}
 }
 
+// Models paste the finished code before the call, which is why the search looks
+// at every brace in the message. In the withNudge study 10 of qwen2.5-coder's
+// 21 zero-edit runs had a complete edit_file call behind a ```go block; the old
+// "first fence, then first brace" pair landed inside the Go function body and
+// dropped the call.
+func TestNormalizeMessage_CallAfterCodeFence(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     string
+		wantName    string
+		wantPath    string
+		wantContent string // whole-file payload, when the call carries one
+	}{
+		{
+			// the exact shape from the study: prose, the fix, prose, the call
+			name: "go fence before a fenced call",
+			content: "The tests in `add_test.go` are failing because `Add` is not defined.\n\n" +
+				"Let's create the file.\n\n```go\npackage fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n```\n\n" +
+				"Now, let's call the edit_file tool:\n\n```json\n" +
+				`{"name":"edit_file","arguments":{"path":"add.go","content":"package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"}}` +
+				"\n```",
+			wantName:    "edit_file",
+			wantPath:    "add.go",
+			wantContent: "package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n",
+		},
+		{
+			// it does not have to be fenced at all
+			name: "go fence before an unfenced call",
+			content: "Here is the fix:\n```go\nfunc Add(a, b int) int {\n\treturn a + b\n}\n```\n" +
+				`{"name":"edit_file","arguments":{"path":"add.go","new_text":"a + b"}}`,
+			wantName: "edit_file",
+			wantPath: "add.go",
+		},
+		{
+			// pasted code can hold json of its own; it must not shadow the call
+			name: "map literal does not shadow the call",
+			content: "The test builds a map:\n```go\nm := map[string]string{\"name\": \"x\"}\n```\n" +
+				`{"name":"read_file","arguments":{"path":"add.go"}}`,
+			wantName: "read_file",
+			wantPath: "add.go",
+		},
+		{
+			// a hallucinated name must not win over a real tool later on
+			name: "unknown call before a known call",
+			content: `{"name":"frobnicate","arguments":{"path":"a.go"}}` + "\n" +
+				`{"name":"read_file","arguments":{"path":"add.go"}}`,
+			wantName: "read_file",
+			wantPath: "add.go",
+		},
+		{
+			// nothing to recover: the payload was cut off mid-value
+			name: "truncated call is not recovered",
+			content: "```go\npackage fixture\n```\n" +
+				`{"name":"edit_file","arguments":{"path":"a.go","content":"package fixture` + "\n\nfunc Add(a, b int) int {\n\treturn a",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &Agent{}
+			got := a.normalizeMessage(ollama.Message{Role: "assistant", Content: tt.content})
+
+			if tt.wantName == "" {
+				if len(got.ToolCalls) != 0 {
+					t.Fatalf("expected no tool call, got %+v", got.ToolCalls)
+				}
+				if got.Content != tt.content {
+					t.Errorf("content was changed: %q", got.Content)
+				}
+				return
+			}
+
+			if len(got.ToolCalls) != 1 {
+				t.Fatalf("got %d tool calls, want 1", len(got.ToolCalls))
+			}
+			call := got.ToolCalls[0].Function
+			if call.Name != tt.wantName {
+				t.Errorf("name = %q, want %q", call.Name, tt.wantName)
+			}
+			if call.Arguments["path"] != tt.wantPath {
+				t.Errorf("path = %v, want %q", call.Arguments["path"], tt.wantPath)
+			}
+			if tt.wantContent != "" && call.Arguments["content"] != tt.wantContent {
+				t.Errorf("content = %q, want %q", call.Arguments["content"], tt.wantContent)
+			}
+			if got.Content != "" {
+				t.Errorf("content = %q, want empty so the template renders the call", got.Content)
+			}
+		})
+	}
+}
+
 // A server-native call never goes through normalizeMessage, so the alias has to
 // be resolved separately or write_file reaches Handle as an unknown tool.
 func TestCanonicalizeNativeCalls(t *testing.T) {
