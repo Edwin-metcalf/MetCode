@@ -343,13 +343,27 @@ func writeWholeFileHelper(path string, content string) ollama.Message {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error creating directory %v", err)}
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+
+	// O_excl open fails if the user manual creates while confirming is waiting
+	if, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+
+	if errors.Is(err, fs.ErrExist) {
+		return ollama.Message{Role: "tool", Content: "error: file was created after the edit was proposed; nothing was written. Call read_file and make an edit against its current contents"}
+	}
+
+	if err != nil {
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
 	}
-	if !exists {
-		return ollama.Message{Role: "tool", Content: fmt.Sprintf("%v file created successfully", path)}
+	if _, err := f.WriteString(newText); err != nil {
+		f.Close()
+		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
 	}
-	return ollama.Message{Role: "tool", Content: fmt.Sprintf("%v file editted succesfully", path)}
+
+	if err := f.Close(); err != nil {
+		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
+	}
+
+	return ollama.Message{Role: "tool", Content: fmt.Sprintf("%v file created successfully", path)}
 }
 
 func prefixLines(text string, prefix string) string {
@@ -364,25 +378,62 @@ func prefixLines(text string, prefix string) string {
 }
 
 func resolveSafePath(root string, requestedPath string) (string, error) {
-	fullPath := filepath.Join(root, requestedPath)
-
-	cleanedPath := filepath.Clean(fullPath)
-	absPath, err := filepath.Abs(cleanedPath)
+	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return "", err
 	}
 
-	relativePath, err := filepath.Rel(root, absPath)
-	// we want it to error then it means there is no relative
+	// root itself may contain symlinks (on macos /var is a link to /private/var),
+	// so resolve it once and compare against that.
+	resolvedRoot, err := filepath.EvalSymlinks(absRoot)
 	if err != nil {
 		return "", err
 	}
 
-	if relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+	fullPath := filepath.Join(absRoot, requestedPath)
+
+	// find the deepest existing ancestor without following symlinks, so a broken
+	// symlink is still visible instead of looking like a missing file.
+	current := fullPath
+	var missing []string
+	for {
+		if _, err := os.Lstat(current); err == nil {
+			break
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("no existing ancestor for %s", fullPath)
+		}
+		missing = append([]string{filepath.Base(current)}, missing...)
+		current = parent
+	}
+
+	// A broken symlink fails here with fs.ErrNotExist. Reject it rather than
+	// falling back to root, or a later write would follow it out of the jail.
+	resolvedAncestor, err := filepath.EvalSymlinks(current)
+	if err != nil {
+		return "", err
+	}
+
+	resolvedPath := filepath.Join(append([]string{resolvedAncestor}, missing...)...)
+
+	// Check containment against the resolved root.
+	relativePath, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if err != nil {
+		return "", err
+	}
+
+	if relativePath == ".." ||
+		strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("path escapes root: %s", relativePath)
 	}
 
-	return absPath, nil
+	// keep the caller's spelling of root, so callers that pass a symlinked root
+	// get a path back that matches what they gave us.
+	return filepath.Join(absRoot, relativePath), nil
 }
 
 func listDirectoryHelper(root string) ollama.Message {

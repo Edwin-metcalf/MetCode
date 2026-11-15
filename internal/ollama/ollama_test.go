@@ -60,6 +60,38 @@ func TestListModels_FailurePath(t *testing.T) {
 	}
 }
 
+func TestVersion_ReadsVersion(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		io.WriteString(w, `{"version":"0.5.1"}`)
+	}))
+	defer srv.Close()
+
+	got, err := Version(srv.URL)
+	if err != nil {
+		t.Fatalf("Version returned error: %v", err)
+	}
+	if gotPath != "/api/version" {
+		t.Errorf("request path = %q, want /api/version", gotPath)
+	}
+	if got != "0.5.1" {
+		t.Errorf("version = %q, want 0.5.1", got)
+	}
+}
+
+func TestVersion_FailurePath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	_, err := Version(srv.URL)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
 // a sentinel error instead of a plain message.
 func TestChat_ClassifiesTransportFailures(t *testing.T) {
 	t.Run("unreachable", func(t *testing.T) {
