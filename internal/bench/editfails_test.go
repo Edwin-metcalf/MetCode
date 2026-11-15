@@ -68,7 +68,10 @@ func TestClassifyEditError_DrivesRealHandlers(t *testing.T) {
 		{"content wrong type", map[string]any{"path": "thing.go", "content": 5}, EditFailMalformed},
 		{"content is a fragment", map[string]any{"path": "thing.go", "content": "return 1"}, EditFailMalformed},
 		{"content empty over existing file", map[string]any{"path": "thing.go", "content": ""}, EditFailMalformed},
-		{"literal backslash n", map[string]any{"path": "thing.go", "old_text": "return 1", "new_text": `return 2\n`}, EditFailMalformed},
+		// "literal backslash n" used to live here. edit_file now repairs that
+		// over-escaped shape instead of rejecting it, so the handler no longer
+		// emits the message. The literal stays in TestClassifyEditError_Literals
+		// so a transcript recorded before the repair still classifies.
 		{"missing file with anchor", map[string]any{"path": "nope.go", "old_text": "abc", "new_text": "def"}, EditFailAnchor},
 		{"anchor not in file", map[string]any{"path": "thing.go", "old_text": "NOT THERE", "new_text": "y"}, EditFailAnchor},
 		{"anchor matches twice", map[string]any{"path": "dup.go", "old_text": "var A = 1", "new_text": "var A = 2"}, EditFailAnchor},

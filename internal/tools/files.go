@@ -109,6 +109,12 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	// instead of being rejected on every call.
 	oldText, oldState := stringArg(call.Function.Arguments, "old_text")
 	wholeText, wholeState, wholeKey := wholeFileArg(call.Function.Arguments)
+	// A model that escaped its own newlines has to be decoded before anything
+	// reads the text: old_text would never match the file, and new_text would be
+	// rejected as literal \n. Both keys or neither, or the anchor stops lining up
+	// with the replacement.
+	oldText = repairEscapes(oldText)
+	wholeText = repairEscapes(wholeText)
 
 	if oldState == argMissing {
 		switch wholeState {
@@ -134,6 +140,7 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	// snippet site would splice the file into itself, so it stays an error that
 	// names the right key.
 	newText, newState := stringArg(call.Function.Arguments, "new_text")
+	newText = repairEscapes(newText)
 	switch newState {
 	case argWrongType:
 		return ollama.Message{Role: "tool", Content: "error: new_text must be a string, not a different JSON type"}
@@ -239,6 +246,44 @@ func wholeFileArg(args map[string]any) (value string, state argState, key string
 
 func hasLiteralNewlines(s string) bool {
 	return !strings.Contains(s, "\n") && strings.Contains(s, `\n`)
+}
+
+// repairEscapes fixes a payload a model double-encoded. Some models (llama3.1)
+// escape their own newlines, so a real line break arrives as the two characters
+// \ and n, and indentation as \ and t. Rejecting that is a dead end: llama
+// resends the identical payload instead of re-encoding, and it did so until the
+// run hit the failure budget.
+//
+// Only the unambiguous shape is repaired — no real newline anywhere and at least
+// one \n escape — so genuine multi-line text and one-line snippets are never
+// touched. Across every recorded study no payload had both real newlines and
+// literal escapes, which is why the mixed shape is left alone.
+func repairEscapes(s string) string {
+	if !hasLiteralNewlines(s) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case 'n':
+				b.WriteByte('\n')
+				i++
+				continue
+			case 't':
+				b.WriteByte('\t')
+				i++
+				continue
+			case '"':
+				b.WriteByte('"')
+				i++
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // goFileError reports whether src is a complete Go source file. Unlike

@@ -674,6 +674,157 @@ func TestEditFileHelper_RejectsBadOldText(t *testing.T) {
 	}
 }
 
+// a payload a model double-encoded gets decoded, but only when the shape is
+// unambiguous: no real line break anywhere and at least one \n escape.
+func TestRepairEscapes(t *testing.T) {
+	cases := map[string]struct {
+		in   string
+		want string
+	}{
+		"escaped whole file": {
+			in:   `package fixture\n\nfunc F() {}\n`,
+			want: "package fixture\n\nfunc F() {}\n",
+		},
+		"escaped indentation": {
+			in:   `func F() {\n\treturn 1\n}`,
+			want: "func F() {\n\treturn 1\n}",
+		},
+		"escaped quotes": {
+			in:   `func F() {\n\tfmt.Println(\"hi\")\n}`,
+			want: "func F() {\n\tfmt.Println(\"hi\")\n}",
+		},
+		"already real newlines": {
+			in:   "package fixture\n\nfunc F() {}\n",
+			want: "package fixture\n\nfunc F() {}\n",
+		},
+		"one line snippet without escapes": {
+			in:   "return a + b",
+			want: "return a + b",
+		},
+		// mixed shape is left alone on purpose: real newlines mean the text is
+		// genuine, so a remaining \n is more likely to belong there.
+		"mixed shape": {
+			in:   "func F() {\n\ts := `a\\nb`\n}\n",
+			want: "func F() {\n\ts := `a\\nb`\n}\n",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := repairEscapes(tc.in); got != tc.want {
+				t.Errorf("repairEscapes(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// the over-escaped shape llama3.1 sends must apply as a real snippet edit.
+// old_text has to be decoded too or the anchor never matches the file.
+func TestEditFileHelper_RepairsEscapedSnippet(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	path := filepath.Join(root, "add.go")
+	original := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name: "edit_file",
+			Arguments: map[string]any{
+				"path":     "add.go",
+				"old_text": `package fixture\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n`,
+				"new_text": `package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n`,
+			},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected the escaped payload to be repaired, got %q", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+	if string(got) != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditFileHelper_RepairsEscapedContent(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	path := filepath.Join(root, "add.go")
+	original := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name: "edit_file",
+			Arguments: map[string]any{
+				"path":    "add.go",
+				"content": `package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n`,
+			},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected the escaped whole file to be repaired, got %q", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+	if string(got) != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+// a genuine multi-line payload keeps a literal backslash-n inside a Go string
+// literal. Repair must not touch text that already has real newlines.
+func TestEditFileHelper_KeepsNewlineInsideGoString(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	path := filepath.Join(root, "a.go")
+	original := "package fixture\n\nfunc A() {}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name: "edit_file",
+			Arguments: map[string]any{
+				"path":     "a.go",
+				"old_text": "func A() {}",
+				"new_text": "func A() {\n\ts := \"a\\nb\"\n\t_ = s\n}",
+			},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected a successful edit, got %q", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), `s := "a\nb"`) {
+		t.Errorf("literal backslash-n inside the string was decoded, file = %q", got)
+	}
+}
+
 func TestRunCommandHelper_RejectsPathEscapingRoot(t *testing.T) {
 	cases := map[string]string{
 		"parent escape":    "../outside",
