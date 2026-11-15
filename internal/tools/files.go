@@ -6,6 +6,7 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -344,8 +345,16 @@ func writeWholeFileHelper(path string, content string) ollama.Message {
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error creating directory %v", err)}
 	}
 
+	// replacing a file that was read before the approval prompt
+	if exists {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
+		}
+		return ollama.Message{Role: "tool", Content: fmt.Sprintf("%v file editted succesfully", path)}
+	}
+
 	// O_excl open fails if the user manual creates while confirming is waiting
-	if, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 
 	if errors.Is(err, fs.ErrExist) {
 		return ollama.Message{Role: "tool", Content: "error: file was created after the edit was proposed; nothing was written. Call read_file and make an edit against its current contents"}
@@ -354,7 +363,7 @@ func writeWholeFileHelper(path string, content string) ollama.Message {
 	if err != nil {
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
 	}
-	if _, err := f.WriteString(newText); err != nil {
+	if _, err := f.WriteString(content); err != nil {
 		f.Close()
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
 	}

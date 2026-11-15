@@ -374,6 +374,47 @@ func TestEditFileHelper_ContentCreatesMissingFile(t *testing.T) {
 	}
 }
 
+// the create path uses O_EXCL so a file that appears while the approval prompt
+// is waiting cannot be clobbered. The guard must stay on the create path only:
+// replacing a file that already existed at read time is the common shape and
+// must not trip it.
+func TestEditFileHelper_CreateRaceDoesNotClobber(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "appeared.txt")
+	userBytes := "written by the user\n"
+
+	old := Approve
+	Approve = func(kind string) bool {
+		if err := os.WriteFile(path, []byte(userBytes), 0o644); err != nil {
+			t.Errorf("seeding the race: %v", err)
+		}
+		return true
+	}
+	t.Cleanup(func() { Approve = old })
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "appeared.txt", "content": "from the model\n"},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if !strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("a file created during the prompt must not be overwritten, got %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "file was created after the edit was proposed") {
+		t.Errorf("error = %q, want the race message", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != userBytes {
+		t.Errorf("file = %q, want the user's bytes untouched", got)
+	}
+}
+
 // models also use "text" for the whole file; it must take the same path.
 func TestEditFileHelper_TextIsWholeFile(t *testing.T) {
 	feedStdin(t, "y\n")
