@@ -47,7 +47,7 @@ var All = []ollama.Tool{
 			// teaches new_text. The handler is the teaching channel; the schema
 			// states both modes.
 			Name:        "edit_file",
-			Description: "Edit a file. Two ways to call it: (1) replace a snippet by providing old_text and new_text; (2) replace or create the whole file by providing content. old_text must match the file exactly and appear only once; call read_file first and copy it exactly. For Go files content must be the complete file including the package clause.",
+			Description: "Edit a file. A call with only path changes nothing: always include a payload. Two ways to call it: (1) replace a snippet by providing old_text and new_text; (2) replace or create the whole file by providing content. old_text must match the file exactly and appear only once; call read_file first and copy it exactly. For Go files content must be the complete file including the package clause.",
 			Parameters: ollama.Parameters{
 				Type:     "object",
 				Required: []string{"path"},

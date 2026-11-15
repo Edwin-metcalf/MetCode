@@ -28,7 +28,7 @@ func fakeApproval(t *testing.T, approve bool) {
 func countNudges(history []ollama.Message) int {
 	n := 0
 	for _, m := range history {
-		if m.Role == "system" && m.Content == editNudge {
+		if m.Role == "system" && strings.HasPrefix(m.Content, editNudge) {
 			n++
 		}
 	}
@@ -62,6 +62,12 @@ func TestEditNudgeMatchesSchema(t *testing.T) {
 		if strings.Contains(editNudge, alias) {
 			t.Errorf("nudge names %q, which is an alias, not a schema tool", alias)
 		}
+	}
+
+	// the read escape hatch cost 14 of 19 nudges on llama3.1: it re-read the
+	// file it had just read instead of sending a payload.
+	if strings.Contains(editNudge, "call read_file first") {
+		t.Error("nudge points at read_file again; it must send the payload instead")
 	}
 }
 
@@ -159,7 +165,7 @@ func TestTurn_NudgeAfterFailedEdit(t *testing.T) {
 
 	nudgeIdx, errorIdx := -1, -1
 	for i, m := range history {
-		if m.Role == "system" && m.Content == editNudge {
+		if m.Role == "system" && strings.HasPrefix(m.Content, editNudge) {
 			nudgeIdx = i
 		}
 		if m.Role == "tool" && strings.HasPrefix(m.Content, "error") && errorIdx == -1 {
@@ -241,5 +247,76 @@ func TestTurn_NoNudgeWhenNotExpected(t *testing.T) {
 	}
 	if reply != "hello" {
 		t.Errorf("reply = %q, want %q", reply, "hello")
+	}
+}
+
+// llama3.1 answered "error: missing required parameter old_text" with "the bug
+// has been fixed" 25 times out of 25. The nudge repeats the failure back so the
+// model cannot mistake its own prose for a result.
+func TestTurn_NudgeQuotesEditError(t *testing.T) {
+	fakeApproval(t, true)
+
+	host := fakeOllama(t,
+		textReply(`{"name":"edit_file","arguments":{"path":"add.go"}}`),
+		textReply("The bug in add.go has been fixed."),
+		textReply("nothing more"),
+	)
+	a := &Agent{Model: "test", Host: host, Root: t.TempDir(), ExpectEdit: true}
+	var history []ollama.Message
+
+	if _, err := a.Turn(&history, "fix add.go"); err != nil {
+		t.Fatalf("Turn returned error: %v", err)
+	}
+
+	var nudge string
+	for _, m := range history {
+		if m.Role == "system" && strings.HasPrefix(m.Content, editNudge) {
+			nudge = m.Content
+		}
+	}
+	if nudge == "" {
+		t.Fatal("no nudge message in history")
+	}
+	if !strings.Contains(nudge, "Your last edit_file did not apply: ") {
+		t.Errorf("nudge does not announce the failure: %q", nudge)
+	}
+	// the quoted text has to come from the handler, not a paraphrase, or the
+	// model is told a different problem than the one it made.
+	if !strings.Contains(nudge, "edit_file with only path") {
+		t.Errorf("nudge does not quote the bare-path error: %q", nudge)
+	}
+}
+
+// with no edit_file error there is nothing to quote, so the nudge stays the
+// plain constant. This keeps the two variants distinguishable in the bench.
+func TestTurn_NudgeWithoutErrorIsShort(t *testing.T) {
+	host := fakeOllama(t, textReply("The bug is in add.go."))
+	a := &Agent{Model: "test", Host: host, Root: t.TempDir(), ExpectEdit: true}
+	var history []ollama.Message
+
+	if _, err := a.Turn(&history, "fix add.go"); err != nil {
+		t.Fatalf("Turn returned error: %v", err)
+	}
+
+	var nudge string
+	for _, m := range history {
+		if m.Role == "system" {
+			nudge = m.Content
+		}
+	}
+	if nudge != editNudge {
+		t.Errorf("nudge = %q, want the plain constant %q", nudge, editNudge)
+	}
+}
+
+func TestClip(t *testing.T) {
+	if got := clip("short", 10); got != "short" {
+		t.Errorf("clip(%q, 10) = %q, want unchanged", "short", got)
+	}
+	// runes, not bytes: a quoted error with a non-ASCII path must not be cut
+	// mid-character.
+	got := clip(strings.Repeat("é", 5), 3)
+	if got != "ééé..." {
+		t.Errorf("clip of 5 multi-byte runes to 3 = %q, want 3 runes + ellipsis", got)
 	}
 }

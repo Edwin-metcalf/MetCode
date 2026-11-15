@@ -117,7 +117,13 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 		case argWrongType:
 			return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: %s must be a string, not a different JSON type", wholeKey)}
 		}
-		return ollama.Message{Role: "tool", Content: "error: missing required parameter old_text: provide old_text + new_text to replace a snippet, or content to replace the whole file. To create a file, send the complete file as content."}
+		// new_text without old_text is a different mistake from a bare {path}
+		// call: the model tried snippet mode and forgot the anchor. Keeping the
+		// two messages apart is what lets bench/editfails.go classify them.
+		if _, hasNewText := call.Function.Arguments["new_text"]; hasNewText {
+			return ollama.Message{Role: "tool", Content: "error: missing required parameter old_text: new_text is the replacement text, so old_text must be sent with it. To replace the whole file, send content instead. Nothing was changed."}
+		}
+		return ollama.Message{Role: "tool", Content: "error: edit_file with only path changes nothing. Send the path with either content = the complete file, or old_text + new_text = replace a snippet. Nothing was changed."}
 	}
 	if oldState == argWrongType {
 		return ollama.Message{Role: "tool", Content: "error: old_text must be a string, not a different JSON type"}

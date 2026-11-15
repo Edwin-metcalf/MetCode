@@ -175,6 +175,9 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 	failRounds := 0
 	edited := false
 	nudged := false
+	// the last edit_file failure, quoted back in the nudge. Empty when the model
+	// never called edit_file at all (or only called it successfully).
+	lastEditErr := ""
 	// one shared budget: a nudged attempt cannot double the tool-call allowance
 	rounds := 0
 
@@ -198,6 +201,8 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 					if call.Function.Name == "edit_file" {
 						edited = true
 					}
+				} else if call.Function.Name == "edit_file" {
+					lastEditErr = clip(result.Content, 240)
 				}
 				*history = append(*history, result)
 			}
@@ -228,7 +233,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 		}
 		nudged = true
 		stats.Nudges += 1
-		*history = append(*history, ollama.Message{Role: "system", Content: editNudge})
+		*history = append(*history, ollama.Message{Role: "system", Content: editNudgeFor(lastEditErr)})
 
 		resp, err = a.chat(*history, false)
 		if err != nil {

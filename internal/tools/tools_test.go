@@ -445,11 +445,14 @@ func TestEditFileHelper_MissingPayloadNamesBothModes(t *testing.T) {
 	if !strings.HasPrefix(result.Content, "error") {
 		t.Fatalf("expected an error, got %q", result.Content)
 	}
-	if !strings.Contains(result.Content, "missing required parameter old_text") {
-		t.Errorf("error should keep the old_text marker, got %q", result.Content)
+	if !strings.Contains(result.Content, "edit_file with only path") {
+		t.Errorf("error should say a bare path does nothing, got %q", result.Content)
 	}
 	if !strings.Contains(result.Content, "content") {
 		t.Errorf("error should name the whole-file mode, got %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "Nothing was changed") {
+		t.Errorf("error should say the file is untouched, got %q", result.Content)
 	}
 }
 

@@ -17,6 +17,9 @@ const (
 // the real handler, so a message that changes shape here fails a test instead
 // of quietly sliding into oth.
 var editFailMarkers = []struct{ marker, reason string }{
+	// a bare {path} call was llama3.1's most common edit_file mistake: 24 of
+	// its 62 calls in the WholeMessageNormalize study
+	{"edit_file with only path", EditFailMalformed},
 	{"missing required parameter old_text", EditFailMalformed},
 	{"missing required parameter new_text", EditFailMalformed},
 	{"old_text must be a string", EditFailMalformed},

@@ -12,6 +12,7 @@ import (
 func TestClassifyEditError_Literals(t *testing.T) {
 	cases := map[string]string{
 		"error: no path provided": EditFailMalformed,
+		"error: edit_file with only path changes nothing. Send the path with either content = the":    EditFailMalformed,
 		"error: missing required parameter old_text: the exact snippet to replace":                    EditFailMalformed,
 		"error: missing required parameter new_text: the replacement text":                            EditFailMalformed,
 		"error: old_text must be a string, not a different JSON type":                                 EditFailMalformed,
@@ -60,6 +61,7 @@ func TestClassifyEditError_DrivesRealHandlers(t *testing.T) {
 	}{
 		{"no path", map[string]any{}, EditFailMalformed},
 		{"no old_text", map[string]any{"path": "thing.go"}, EditFailMalformed},
+		{"new_text without old_text", map[string]any{"path": "thing.go", "new_text": "y"}, EditFailMalformed},
 		{"old_text wrong type", map[string]any{"path": "thing.go", "old_text": 5, "new_text": "y"}, EditFailMalformed},
 		{"content instead of new_text", map[string]any{"path": "thing.go", "old_text": "", "content": "y"}, EditFailMalformed},
 		{"text instead of new_text", map[string]any{"path": "thing.go", "old_text": "", "text": "y"}, EditFailMalformed},
