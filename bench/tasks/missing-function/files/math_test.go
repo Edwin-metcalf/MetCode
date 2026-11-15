@@ -14,6 +14,7 @@ func TestMultiplyMatrices(t *testing.T) {
 		matrixB := [][]int{
 			{7, 8},
 			{9, 10},
+			{11, 12},
 		}
 
 		got := multiplyMatrices(matrixA, matrixB)

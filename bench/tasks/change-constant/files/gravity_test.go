@@ -32,9 +32,9 @@ func TestCalculateGravity(t *testing.T) {
 			mass1: 1.0,
 			mass2: 1.0,
 			// F_mag = 9.81 * (1 * 1) / 3 = 3.27
-			// Unit vector components = 1 / sqrt(3) ~= 0.57735
-			// Component force ~= 3.27 * 0.57735 = 1.887932
-			wantForce: Vector3{X: 1.887932, Y: 1.887932, Z: 1.887932},
+			// Unit vector components = 1 / sqrt(3) ~= 0.5773502692
+			// Component force = 3.27 * 0.5773502692 = 1.8879354
+			wantForce: Vector3{X: 1.887935, Y: 1.887935, Z: 1.887935},
 		},
 		{
 			name:      "Zero distance division safety",

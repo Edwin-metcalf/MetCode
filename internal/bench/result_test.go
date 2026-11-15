@@ -248,7 +248,7 @@ func TestResultJSONKeys(t *testing.T) {
 		"task", "model", "run_index", "num_ctx", "temperature", "prompt_hash", "git_commit", "ollama_version",
 		"passed", "no_tools", "tampered", "ended", "edit_applied", "final_reply", "transcript",
 		"tool_calls", "tool_errors", "unnecessary_calls", "declined_commands", "grade_output",
-		"rounds", "prompt_tokens", "output_tokens", "wall_ms", "load_ms", "prefill_ms", "gen_ms",
+		"rounds", "nudges", "prompt_tokens", "output_tokens", "wall_ms", "load_ms", "prefill_ms", "gen_ms",
 	}
 	for _, k := range want {
 		if _, ok := got[k]; !ok {
@@ -267,7 +267,7 @@ func TestResultJSONRoundTrip(t *testing.T) {
 		Passed: true, NoTools: true, Tampered: true, Ended: "max_rounds", EditApplied: true,
 		ToolCalls: map[string]int{"read_file": 3}, ToolErrors: map[string]int{"edit_file": 1},
 		UnnecessaryCalls: 4, DeclinedCommands: 5,
-		Rounds: 6, PromptTokens: 7, OutputTokens: 8, WallMS: 9,
+		Rounds: 6, Nudges: 13, PromptTokens: 7, OutputTokens: 8, WallMS: 9,
 		LoadMS: 10, PrefillMS: 11, GenMS: 12,
 	}
 	b, err := json.Marshal(in)
@@ -313,8 +313,34 @@ func TestRun_NoOpModelFails(t *testing.T) {
 	if total(res.ToolCalls) != 0 || res.Rounds != 0 {
 		t.Errorf("no tools were called, got calls %v rounds %d", res.ToolCalls, res.Rounds)
 	}
-	if res.PromptTokens != 10 || res.OutputTokens != 5 {
-		t.Errorf("tokens = %d/%d, want 10/5 from the scripted reply", res.PromptTokens, res.OutputTokens)
+	if res.PromptTokens != 20 || res.OutputTokens != 10 {
+		t.Errorf("tokens = %d/%d, want 20/10 (the answer plus one nudged retry)", res.PromptTokens, res.OutputTokens)
+	}
+	// the same turn proves the no-edit nudge fires once and does not loop
+	if res.Nudges != 1 {
+		t.Errorf("Nudges = %d, want 1 for a turn that never edited", res.Nudges)
+	}
+}
+
+// a tool task whose answer never touches a file gets exactly one nudge, and the
+// nudge is recorded so a study can measure how often it fired and what it bought.
+func TestRun_NoEditGetsOneNudge(t *testing.T) {
+	task, _ := newAddWorkspace(t)
+	srv := newFakeOllama(t, textReply("Add should return a + b."))
+
+	res := runTask(t, task, srv)
+
+	if res.Nudges != 1 {
+		t.Errorf("Nudges = %d, want 1", res.Nudges)
+	}
+	if len(srv.bodies) != 2 {
+		t.Errorf("model calls = %d, want 2 (the answer plus one nudged retry)", len(srv.bodies))
+	}
+	if res.EditApplied || res.Passed {
+		t.Errorf("the model ignored the nudge, so it must not pass: %+v", res)
+	}
+	if res.Ended != "ok" {
+		t.Errorf("Ended = %q, want ok", res.Ended)
 	}
 }
 
@@ -340,9 +366,11 @@ func TestRun_RecordsIdentity(t *testing.T) {
 }
 
 // load, prefill and generation come from ollama's per-call durations, so a
-// report can subtract them from WallMS and see the model's own speed.
+// report can subtract them from WallMS and see the model's own speed. A
+// no_tools task keeps this at exactly one model call so the sums are obvious.
 func TestRun_RecordsModelTiming(t *testing.T) {
-	task, _ := newAddWorkspace(t)
+	task := loadTask(t, "greeting", `{"prompt": "Say hi.", "no_tools": true}`,
+		map[string]string{"notes.txt": "scratch"})
 	srv := newFakeOllama(t, textReply("ok"))
 
 	res := runTask(t, task, srv)
@@ -462,15 +490,42 @@ func TestRun_IsQuiet(t *testing.T) {
 	}
 }
 
-func TestRun_NoToolsTaskIsNotGraded(t *testing.T) {
+func TestRun_NoToolsTaskPassesOnPlainReply(t *testing.T) {
 	task := loadTask(t, "greeting", `{"prompt": "Say hi.", "no_tools": true}`,
 		map[string]string{"notes.txt": "scratch"})
 	srv := newFakeOllama(t, textReply("hi!"))
 
 	res := runTask(t, task, srv)
 
-	if res.Ended != "ok" || !res.NoTools || res.Passed || res.UnnecessaryCalls != 0 || res.EditApplied {
-		t.Errorf("unexpected result for a polite no_tools run: %+v", res)
+	if res.Ended != "ok" || !res.NoTools {
+		t.Fatalf("unexpected run state: %+v", res)
+	}
+	if !res.Passed {
+		t.Errorf("a plain reply on a no_tools task should pass: %+v", res)
+	}
+	if res.UnnecessaryCalls != 0 || res.EditApplied {
+		t.Errorf("no tool use expected on a plain reply: %+v", res)
+	}
+	if res.Nudges != 0 {
+		t.Errorf("a no_tools task must never be nudged, got Nudges = %d", res.Nudges)
+	}
+}
+
+func TestRun_NoToolsTaskFailsOnToolCall(t *testing.T) {
+	task := loadTask(t, "greeting", `{"prompt": "Say hi.", "no_tools": true}`,
+		map[string]string{"notes.txt": "scratch"})
+	srv := newFakeOllama(t,
+		toolReply("read_file", map[string]any{"path": "notes.txt"}),
+		textReply("hi!"),
+	)
+
+	res := runTask(t, task, srv)
+
+	if res.Passed {
+		t.Errorf("a no_tools task that called a tool must fail: %+v", res)
+	}
+	if res.UnnecessaryCalls == 0 {
+		t.Errorf("the tool call should be counted as unnecessary: %+v", res)
 	}
 }
 

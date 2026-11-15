@@ -3,6 +3,9 @@ package tools
 import (
 	"errors"
 	"fmt"
+	"go/format"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -101,30 +104,55 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 		return ollama.Message{Role: "tool", Content: "error: path is possibly dangerous"}
 	}
 
-	// old text strick here, ok if empty that would mean new file is being created
+	// Two payload shapes share this handler. old_text + new_text replaces a
+	// snippet; content (or text) replaces the whole file. Small models send the
+	// whole file far more often than an exact anchor, so content is handled here
+	// instead of being rejected on every call.
 	oldText, oldState := stringArg(call.Function.Arguments, "old_text")
-	switch oldState {
-	case argWrongType:
+	wholeText, wholeState, wholeKey := wholeFileArg(call.Function.Arguments)
+	// A model that escaped its own newlines has to be decoded before anything
+	// reads the text: old_text would never match the file, and new_text would be
+	// rejected as literal \n. Both keys or neither, or the anchor stops lining up
+	// with the replacement.
+	oldText = repairEscapes(oldText)
+	wholeText = repairEscapes(wholeText)
+
+	if oldState == argMissing {
+		switch wholeState {
+		case argFound:
+			return writeWholeFileHelper(path, wholeText)
+		case argWrongType:
+			return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: %s must be a string, not a different JSON type", wholeKey)}
+		}
+		// new_text without old_text is a different mistake from a bare {path}
+		// call: the model tried snippet mode and forgot the anchor. Keeping the
+		// two messages apart is what lets bench/editfails.go classify them.
+		if _, hasNewText := call.Function.Arguments["new_text"]; hasNewText {
+			return ollama.Message{Role: "tool", Content: "error: missing required parameter old_text: new_text is the replacement text, so old_text must be sent with it. To replace the whole file, send content instead. Nothing was changed."}
+		}
+		return ollama.Message{Role: "tool", Content: "error: edit_file with only path changes nothing. Send the path with either content = the complete file, or old_text + new_text = replace a snippet. Nothing was changed."}
+	}
+	if oldState == argWrongType {
 		return ollama.Message{Role: "tool", Content: "error: old_text must be a string, not a different JSON type"}
-	case argMissing:
-		return ollama.Message{Role: "tool", Content: "error: missing required parameter old_text: the exact snippet to replace, copied from read_file. Use an empty string only when creating a new file"}
 	}
 
-	// new_text is only the text that replaces the old_text snippet, not the whole
-	// file. Some models try to send content which is the entire new file. So tell the model
-	// the right key and let it fix itself.
+	// new_text is only the text that replaces the old_text snippet. old_text
+	// plus a whole-file payload is the dangerous shape: applying content at the
+	// snippet site would splice the file into itself, so it stays an error that
+	// names the right key.
 	newText, newState := stringArg(call.Function.Arguments, "new_text")
+	newText = repairEscapes(newText)
 	switch newState {
 	case argWrongType:
 		return ollama.Message{Role: "tool", Content: "error: new_text must be a string, not a different JSON type"}
 	case argMissing:
-		if _, contentState := stringArg(call.Function.Arguments, "content"); contentState != argMissing {
-			return ollama.Message{Role: "tool", Content: "error: edit_file takes new_text, not content. new_text is only the text that replaces old_text, not the whole file"}
+		if wholeState != argMissing {
+			return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: edit_file takes new_text, not %s. new_text is only the text that replaces old_text, not the whole file. To replace the whole file, send content without old_text.", wholeKey)}
 		}
 		return ollama.Message{Role: "tool", Content: "error: missing required parameter new_text: the replacement text for old_text"}
 	}
 
-	if !strings.Contains(newText, "\n") && strings.Contains(newText, `\n`) {
+	if hasLiteralNewlines(newText) {
 		return ollama.Message{Role: "tool", Content: "error: new_text contains the characters \\n instead of real line breaks. Resend using actual newlines"}
 	}
 
@@ -148,14 +176,38 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	fileContent := string(fileContentBytes)
 	count := strings.Count(fileContent, oldText)
 
-	if count == 0 {
-		return ollama.Message{Role: "tool", Content: "error: old_text not found in file. Call read_file and copy old_text exactly from its output, including indentation. Use a short unique snippet."}
-	}
-	if count > 1 {
+	var newContent string
+	switch {
+	case count > 1:
 		return ollama.Message{Role: "tool", Content: "error: old_text matches multiple locations (or is empty but the file is not). Include more surrounding lines so it matches exactly once."}
+	case count == 1:
+		newContent = strings.Replace(fileContent, oldText, newText, 1)
+	default:
+		// exact match failed, so try again ignoring indentation
+		if looksLikeToolCall(oldText) {
+			return ollama.Message{Role: "tool", Content: "error: old_text looks like a function call. old_text must be text copied from read_file output, not a tool call."}
+		}
+		start, end, err := findLooseMatch(fileContent, oldText)
+		if err != nil {
+			return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: old_text not found in file (%v). Call read_file and copy old_text exactly from its output. Use a short unique snippet.", err)}
+		}
+		region := fileContent[start:end]
+		newText = reindentLike(newText, region)
+		if strings.HasSuffix(region, "\n") && newText != "" && !strings.HasSuffix(newText, "\n") {
+			newText += "\n"
+		}
+		newContent = fileContent[:start] + newText + fileContent[end:]
 	}
 
-	newContent := strings.Replace(fileContent, oldText, newText, 1)
+	// Reject an edit that breaks a Go file which parsed before the edit.
+	// Files that were already broken are not blocked, so they can still be fixed.
+	if strings.HasSuffix(path, ".go") {
+		_, origErr := format.Source(fileContentBytes)
+		_, newErr := format.Source([]byte(newContent))
+		if origErr == nil && newErr != nil {
+			return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: this edit would make %s invalid Go (%v). The edit was not applied. Fix new_text and retry.", filepath.Base(path), newErr)}
+		}
+	}
 
 	printLoud("----- proposed change to ", path, "------")
 	printLoud(prefixLines(oldText, "- "))
@@ -174,16 +226,114 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	return ollama.Message{Role: "tool", Content: fmt.Sprintf("%v file editted succesfully", path)}
 }
 
+// createFileHelper creates a file through the same validated write path as a
+// whole-file replacement, so approval and checks live in one place.
 func createFileHelper(path string, newText string) ollama.Message {
-	//helper to create a file if edit file is called on a file that does not exist
+	return writeWholeFileHelper(path, newText)
+}
 
-	//check again if the file has been edited since
-	if _, err := os.Lstat(path); err == nil {
-		return ollama.Message{Role: "tool", Content: "error: file already exists. Call read_file and make an edit against its current contents"}
+// wholeFileArg returns the payload a model sent to replace the whole file.
+// content is the documented key; text is accepted because small models use it
+// with the same meaning. The key is returned so an error can name what the
+// model actually sent.
+func wholeFileArg(args map[string]any) (value string, state argState, key string) {
+	for _, k := range []string{"content", "text"} {
+		if v, s := stringArg(args, k); s != argMissing {
+			return v, s, k
+		}
+	}
+	return "", argMissing, ""
+}
+
+func hasLiteralNewlines(s string) bool {
+	return !strings.Contains(s, "\n") && strings.Contains(s, `\n`)
+}
+
+// repairEscapes fixes a payload a model double-encoded. Some models (llama3.1)
+// escape their own newlines, so a real line break arrives as the two characters
+// \ and n, and indentation as \ and t. Rejecting that is a dead end: llama
+// resends the identical payload instead of re-encoding, and it did so until the
+// run hit the failure budget.
+//
+// Only the unambiguous shape is repaired — no real newline anywhere and at least
+// one \n escape — so genuine multi-line text and one-line snippets are never
+// touched. Across every recorded study no payload had both real newlines and
+// literal escapes, which is why the mixed shape is left alone.
+func repairEscapes(s string) string {
+	if !hasLiteralNewlines(s) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case 'n':
+				b.WriteByte('\n')
+				i++
+				continue
+			case 't':
+				b.WriteByte('\t')
+				i++
+				continue
+			case '"':
+				b.WriteByte('"')
+				i++
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+// goFileError reports whether src is a complete Go source file. Unlike
+// format.Source it rejects a bare declaration or statement list, so a fragment
+// cannot pass as a whole file.
+func goFileError(src []byte) error {
+	_, err := parser.ParseFile(token.NewFileSet(), "", src, parser.SkipObjectResolution)
+	return err
+}
+
+// writeWholeFileHelper is the only path that writes a whole file. It refuses
+// the shapes that corrupt files: a fragment of a Go file, an empty body over an
+// existing file, or literal \n, then shows a diff and asks for approval.
+func writeWholeFileHelper(path string, content string) ollama.Message {
+	if hasLiteralNewlines(content) {
+		return ollama.Message{Role: "tool", Content: "error: content contains the characters \\n instead of real line breaks. Resend using actual newlines"}
 	}
 
-	printLoud("----- proposed change to new file: ", path, "------")
-	printLoud(prefixLines(newText, "+ "))
+	oldBytes, readErr := os.ReadFile(path)
+	exists := readErr == nil
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: finding file: %v", readErr)}
+	}
+	if exists && content == "" {
+		return ollama.Message{Role: "tool", Content: "error: content is empty. Refusing to replace an existing file with nothing; send the complete new file contents."}
+	}
+
+	if strings.HasSuffix(path, ".go") {
+		// format.Source alone is not enough here: it also accepts a bare
+		// declaration or statement list, which is exactly the fragment shape
+		// that would gut the file. Require a full file with a package clause.
+		if newErr := goFileError([]byte(content)); newErr != nil {
+			// Mirror the snippet path: never break a file that parses today, but
+			// allow an already-broken file to be replaced.
+			allow := false
+			if exists {
+				allow = goFileError(oldBytes) != nil
+			}
+			if !allow {
+				return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: content is not valid Go (%v). content must be the complete file including the package clause. To replace a snippet, use old_text + new_text. The edit was not applied.", newErr)}
+			}
+		}
+	}
+
+	printLoud("----- proposed change to ", path, "------")
+	if exists {
+		printLoud(prefixLines(string(oldBytes), "- "))
+	}
+	printLoud(prefixLines(content, "+ "))
 	printLoud("------------------------------")
 	printLoud("apply this edit? (y/n)")
 
@@ -191,9 +341,16 @@ func createFileHelper(path string, newText string) ollama.Message {
 		return ollama.Message{Role: "tool", Content: "Edit canceled by user"}
 	}
 
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error creating directory %v", err)}
+	}
+
+	// replacing a file that was read before the approval prompt
+	if exists {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
+		}
+		return ollama.Message{Role: "tool", Content: fmt.Sprintf("%v file editted succesfully", path)}
 	}
 
 	// O_excl open fails if the user manual creates while confirming is waiting
@@ -206,7 +363,7 @@ func createFileHelper(path string, newText string) ollama.Message {
 	if err != nil {
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
 	}
-	if _, err := f.WriteString(newText); err != nil {
+	if _, err := f.WriteString(content); err != nil {
 		f.Close()
 		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error writing file: %v", err)}
 	}

@@ -6,13 +6,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
+	"github.com/Edwin-metcalf/MetCode/internal/tools"
 )
 
 // fakeOllama serves the replies in order, repeating the last one forever.
@@ -125,215 +125,6 @@ func TestTurn_StatsCalledOnceOnError(t *testing.T) {
 	}
 }
 
-// normalizeMessage is the unit under test: it turns a tool call the model
-// wrote as plain text into a real ToolCall on the message.
-func TestNormalizeMessage(t *testing.T) {
-	tests := []struct {
-		name     string
-		content  string
-		wantCall bool
-		wantName string
-		wantArgs map[string]any
-	}{
-		{
-			// the shape qwen2.5-coder emits: flat, with "arguments"
-			name:     "flat arguments",
-			content:  `{"name":"edit_file","arguments":{"path":"a.go","old_text":"","new_text":"x"}}`,
-			wantCall: true,
-			wantName: "edit_file",
-			wantArgs: map[string]any{"path": "a.go", "old_text": "", "new_text": "x"},
-		},
-		{
-			// the shape llama3.1 emits: flat, but the model reached for the
-			// schema's word "parameters" instead of the call's word "arguments"
-			name:     "flat parameters",
-			content:  `{"name":"edit_file","parameters":{"path":"a.go"}}`,
-			wantCall: true,
-			wantName: "edit_file",
-			wantArgs: map[string]any{"path": "a.go"},
-		},
-		{
-			// the shape Ollama's own wire format uses: nested under "function"
-			name:     "nested function arguments",
-			content:  `{"type":"function","function":{"name":"edit_file","arguments":{"path":"a.go"}}}`,
-			wantCall: true,
-			wantName: "edit_file",
-			wantArgs: map[string]any{"path": "a.go"},
-		},
-		{
-			// nested AND the wrong key, to exercise the Function.Parameters path
-			name:     "nested function parameters",
-			content:  `{"function":{"name":"edit_file","parameters":{"path":"a.go"}}}`,
-			wantCall: true,
-			wantName: "edit_file",
-			wantArgs: map[string]any{"path": "a.go"},
-		},
-		{
-			// the template's <tool_call> wrapper around flat arguments
-			name: "tool_call tags",
-			content: `<tool_call>
-{"name":"edit_file","arguments":{"path":"a.go"}}
-</tool_call>`,
-			wantCall: true,
-			wantName: "edit_file",
-			wantArgs: map[string]any{"path": "a.go"},
-		},
-		{
-			// a no-argument tool: arguments is an empty object, still a call
-			name:     "empty arguments object",
-			content:  `{"name":"list_directory","arguments":{}}`,
-			wantCall: true,
-			wantName: "list_directory",
-			wantArgs: map[string]any{},
-		},
-		{
-			// qwen2.5-coder wraps the call in a json-tagged markdown fence
-			name:     "fenced with json tag",
-			content:  "```json\n{\"name\": \"run_command\", \"arguments\": {\"command\": \"cat\", \"arguments\": [\"job.go\"]}}\n```",
-			wantCall: true,
-			wantName: "run_command",
-			wantArgs: map[string]any{"command": "cat", "arguments": []any{"job.go"}},
-		},
-		{
-			// a bare fence with no language tag
-			name:     "fenced bare",
-			content:  "```\n{\"name\":\"edit_file\",\"arguments\":{\"path\":\"a.go\"}}\n```",
-			wantCall: true,
-			wantName: "edit_file",
-			wantArgs: map[string]any{"path": "a.go"},
-		},
-		{
-			// a json5 tag is still a fence
-			name:     "fenced with json5 tag",
-			content:  "```json5\n{\"name\":\"edit_file\",\"arguments\":{\"path\":\"a.go\"}}\n```",
-			wantCall: true,
-			wantName: "edit_file",
-			wantArgs: map[string]any{"path": "a.go"},
-		},
-		{
-			// the fence wrapped around the whole tool_call block
-			name:     "fenced around tool_call tags",
-			content:  "```json\n<tool_call>\n{\"name\":\"edit_file\",\"arguments\":{\"path\":\"a.go\"}}\n</tool_call>\n```",
-			wantCall: true,
-			wantName: "edit_file",
-			wantArgs: map[string]any{"path": "a.go"},
-		},
-		{
-			// the fence inside the tool_call tags
-			name:     "fenced inside tool_call tags",
-			content:  "<tool_call>\n```json\n{\"name\":\"edit_file\",\"arguments\":{\"path\":\"a.go\"}}\n```\n</tool_call>",
-			wantCall: true,
-			wantName: "edit_file",
-			wantArgs: map[string]any{"path": "a.go"},
-		},
-		{
-			// a fenced block that is valid JSON but not a tool call stays put
-			name:     "fenced json that is not a call",
-			content:  "```json\n{\"foo\": 1}\n```",
-			wantCall: false,
-		},
-		{
-			// prose with a fenced code sample must pass through untouched
-			name:     "prose with fenced code is not a call",
-			content:  "Here is the file:\n```go\nfunc main() {}\n```",
-			wantCall: false,
-		},
-		{
-			// plain prose must pass through untouched
-			name:     "prose is not a call",
-			content:  "hello there, how can I help?",
-			wantCall: false,
-		},
-		{
-			// valid JSON, but carries no tool call
-			name:     "json without a name is not a call",
-			content:  `{"foo":1}`,
-			wantCall: false,
-		},
-		{
-			name:     "empty content is not a call",
-			content:  "",
-			wantCall: false,
-		},
-		{
-			// looks like an attempt but is not parseable: leave it alone
-			name:     "malformed json is not a call",
-			content:  `{"name": "edit_file", "arguments": }`,
-			wantCall: false,
-		},
-
-		{
-			// add-bug rows 1-4: a sentence of reasoning, then the call
-			name:     "prose then a call",
-			content:  "I'll start by listing the files.\n\n{\"name\":\"list_directory\",\"arguments\":{}}",
-			wantCall: true,
-			wantName: "list_directory",
-			wantArgs: map[string]any{},
-		},
-		{
-			// add-bug-descriptive rows 5, 6, 9: two calls back to back.
-			// only the first is returned, because firstCallOnly keeps one call
-			// per message anyway; the second must not make decoding fail
-			name:     "two calls back to back",
-			content:  "{\"name\":\"list_directory\",\"arguments\":{}}\n\n{\"name\":\"read_file\",\"arguments\":{\"path\":\"add.go\"}}",
-			wantCall: true,
-			wantName: "list_directory",
-			wantArgs: map[string]any{},
-		},
-	}
-
-	a := &Agent{}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := a.normalizeMessage(ollama.Message{Role: "assistant", Content: tt.content})
-
-			if !tt.wantCall {
-				if len(got.ToolCalls) != 0 {
-					t.Fatalf("expected no tool call, got %+v", got.ToolCalls)
-				}
-				if got.Content != tt.content {
-					t.Errorf("content = %q, want it left untouched (%q)", got.Content, tt.content)
-				}
-				return
-			}
-
-			if len(got.ToolCalls) != 1 {
-				t.Fatalf("got %d tool calls, want 1", len(got.ToolCalls))
-			}
-			if got.ToolCalls[0].Function.Name != tt.wantName {
-				t.Errorf("name = %q, want %q", got.ToolCalls[0].Function.Name, tt.wantName)
-			}
-			if !reflect.DeepEqual(got.ToolCalls[0].Function.Arguments, tt.wantArgs) {
-				t.Errorf("arguments = %#v, want %#v", got.ToolCalls[0].Function.Arguments, tt.wantArgs)
-			}
-			// cleared so the chat template renders the tool call instead of text
-			if got.Content != "" {
-				t.Errorf("content = %q, want empty", got.Content)
-			}
-		})
-	}
-}
-
-// a real tool call from Ollama must never be replaced by a text one
-func TestNormalizeMessage_KeepsExistingToolCalls(t *testing.T) {
-	a := &Agent{}
-	real := ollama.ToolCall{Function: ollama.CalledFunction{
-		Name:      "read_file",
-		Arguments: map[string]any{"path": "x"},
-	}}
-	m := ollama.Message{
-		Role:      "assistant",
-		Content:   `{"name":"edit_file","arguments":{"path":"a.go"}}`,
-		ToolCalls: []ollama.ToolCall{real},
-	}
-
-	got := a.normalizeMessage(m)
-
-	if len(got.ToolCalls) != 1 || got.ToolCalls[0].Function.Name != "read_file" {
-		t.Fatalf("existing tool call was overwritten: %+v", got.ToolCalls)
-	}
-}
-
 // end to end: a content-only call must actually run through Turn, with its
 // arguments reaching the tool.
 func TestTurn_SalvagesToolCallFromContent(t *testing.T) {
@@ -402,12 +193,15 @@ func TestTurn_SalvagesToolCallFromContent(t *testing.T) {
 }
 
 // a hallucinated tool name is still routed to Handle, so the model gets a
-// readable error back and can correct itself (rather than us printing raw JSON)
+// readable error back and can correct itself (rather than us printing raw JSON).
+// "frobnicate" is used on purpose: create_file/write_file/update_file are aliased
+// to edit_file now, so they would succeed instead of reaching the unknown-tool
+// path. Aliases are covered by TestTurn_AliasIsResolvedToEditFile.
 func TestTurn_HallucinatedToolNameIsRoutedToHandle(t *testing.T) {
 	host := fakeOllama(t,
 		ollama.ChatResponse{Message: ollama.Message{
 			Role:    "assistant",
-			Content: `{"name":"create_file","arguments":{"path":"x.txt","new_text":"hi"}}`,
+			Content: `{"name":"frobnicate","arguments":{"path":"x.txt"}}`,
 		}},
 		ollama.ChatResponse{Message: ollama.Message{Role: "assistant", Content: "I will use edit_file instead"}},
 	)
@@ -421,14 +215,61 @@ func TestTurn_HallucinatedToolNameIsRoutedToHandle(t *testing.T) {
 	if len(history) != 4 {
 		t.Fatalf("history has %d messages, want 4", len(history))
 	}
-	if got := history[1].ToolCalls[0].Function.Name; got != "create_file" {
-		t.Errorf("salvaged tool name = %q, want create_file", got)
+	if got := history[1].ToolCalls[0].Function.Name; got != "frobnicate" {
+		t.Errorf("salvaged tool name = %q, want frobnicate", got)
 	}
 	if !strings.HasPrefix(history[2].Content, "error") {
 		t.Errorf("tool result = %q, want an error the model can react to", history[2].Content)
 	}
 	if reply != "I will use edit_file instead" {
 		t.Errorf("reply = %q, want the model's follow-up", reply)
+	}
+}
+
+// a text call that names a tool the schema no longer has is resolved to the
+// canonical tool instead of failing as unknown. old_text must be present (even
+// empty) or edit_file rejects the call before it can create the file.
+func TestTurn_AliasIsResolvedToEditFile(t *testing.T) {
+	host := fakeOllama(t,
+		ollama.ChatResponse{Message: ollama.Message{
+			Role:    "assistant",
+			Content: `{"name":"create_file","arguments":{"path":"x.txt","old_text":"","new_text":"hi"}}`,
+		}},
+		ollama.ChatResponse{Message: ollama.Message{Role: "assistant", Content: "done"}},
+	)
+	root := t.TempDir()
+	a := &Agent{Model: "test", Host: host, Root: root}
+	var history []ollama.Message
+
+	// edit_file asks for a y/n confirmation; answer it without touching os.Stdin
+	oldApprove, oldQuiet := tools.Approve, tools.Quiet
+	tools.Approve = func(string) bool { return true }
+	tools.Quiet = true
+	t.Cleanup(func() { tools.Approve, tools.Quiet = oldApprove, oldQuiet })
+
+	reply, err := a.Turn(&history, "make a file")
+	if err != nil {
+		t.Fatalf("Turn returned error: %v", err)
+	}
+	if reply != "done" {
+		t.Errorf("reply = %q, want %q", reply, "done")
+	}
+	if len(history) != 4 {
+		t.Fatalf("history has %d messages, want 4", len(history))
+	}
+	if got := history[1].ToolCalls[0].Function.Name; got != "edit_file" {
+		t.Errorf("aliased tool name = %q, want edit_file", got)
+	}
+	if want := "x.txt file created successfully"; !strings.HasSuffix(history[2].Content, want) {
+		t.Errorf("tool result = %q, want it to end with %q", history[2].Content, want)
+	}
+	// the real proof the call reached the file handler, not just the switch
+	body, err := os.ReadFile(filepath.Join(root, "x.txt"))
+	if err != nil {
+		t.Fatalf("reading the created file: %v", err)
+	}
+	if string(body) != "hi" {
+		t.Errorf("x.txt = %q, want %q", body, "hi")
 	}
 }
 
@@ -648,115 +489,5 @@ func TestCompactHistory_EmptySummaryIsError(t *testing.T) {
 	history := []ollama.Message{{Role: "user", Content: "hi"}}
 	if _, err := a.CompactHistory(&history); err == nil {
 		t.Fatalf("an empty summary should return an error")
-	}
-}
-
-func TestStripCodeFence(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{
-			name: "prose before the fence",
-			in:   "Sure, I'll create that file:\n```json\n{\"name\":\"edit_file\"}\n```",
-			want: "{\"name\":\"edit_file\"}",
-		},
-		{
-			name: "indented closing fence",
-			in:   "```json\n{\"name\":\"edit_file\"}\n   ```",
-			want: "{\"name\":\"edit_file\"}",
-		},
-		{
-			name: "trailing prose after the fence",
-			in:   "```json\n{\"name\":\"list_directory\",\"arguments\":{}}\n```\nLet me know if you need anything else!",
-			want: "{\"name\":\"list_directory\",\"arguments\":{}}",
-		},
-		{
-			name: "single-line fence",
-			in:   "```json {\"name\":\"list_directory\",\"arguments\":{}} ```",
-			want: "{\"name\":\"list_directory\",\"arguments\":{}}",
-		},
-		{
-			name: "unclosed fence",
-			in:   "```json\n{\"name\":\"edit_file\"}",
-			want: "{\"name\":\"edit_file\"}",
-		},
-		{
-			name: "tilde fence",
-			in:   "~~~json\n{\"a\":1}\n~~~",
-			want: "{\"a\":1}",
-		},
-		{
-			name: "four backticks",
-			in:   "````json\n{\"a\":1}\n````",
-			want: "{\"a\":1}",
-		},
-		{
-			name: "CRLF input",
-			in:   "```json\r\n{\"a\":1}\r\n```",
-			want: "{\"a\":1}",
-		},
-		{
-			name: "no fence passthrough",
-			in:   "plain text",
-			want: "plain text",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := stripCodeFence(tt.in); got != tt.want {
-				t.Errorf("stripCodeFence() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestNormalizeMessage_RecoversFencedCalls(t *testing.T) {
-	tests := []struct {
-		name    string
-		content string
-		want    string
-		args    map[string]any
-	}{
-		{
-			name:    "prose before the fence",
-			content: "Sure, I'll create that file:\n```json\n{\"name\":\"edit_file\",\"arguments\":{\"path\":\"a.go\"}}\n```",
-			want:    "edit_file",
-			args:    map[string]any{"path": "a.go"},
-		},
-		{
-			name:    "indented closing fence",
-			content: "```json\n{\"name\":\"edit_file\",\"arguments\":{\"path\":\"a.go\"}}\n   ```",
-			want:    "edit_file",
-			args:    map[string]any{"path": "a.go"},
-		},
-		{
-			name:    "trailing prose after the fence",
-			content: "```json\n{\"name\":\"list_directory\",\"arguments\":{}}\n```\nLet me know if you need anything else!",
-			want:    "list_directory",
-			args:    map[string]any{},
-		},
-		{
-			name:    "single-line fence",
-			content: "```json {\"name\":\"list_directory\",\"arguments\":{}} ```",
-			want:    "list_directory",
-			args:    map[string]any{},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			a := &Agent{}
-			got := a.normalizeMessage(ollama.Message{Role: "assistant", Content: tt.content})
-			if len(got.ToolCalls) != 1 {
-				t.Fatalf("got %d tool calls, want 1", len(got.ToolCalls))
-			}
-			if got.ToolCalls[0].Function.Name != tt.want {
-				t.Errorf("name = %q, want %q", got.ToolCalls[0].Function.Name, tt.want)
-			}
-			if !reflect.DeepEqual(got.ToolCalls[0].Function.Arguments, tt.args) {
-				t.Errorf("arguments = %#v, want %#v", got.ToolCalls[0].Function.Arguments, tt.args)
-			}
-		})
 	}
 }

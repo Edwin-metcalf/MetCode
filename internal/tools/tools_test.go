@@ -283,6 +283,220 @@ func TestEditFileHelper_RejectsContentAsNewText(t *testing.T) {
 	}
 }
 
+// the shape small models actually send: path plus the whole file. a complete Go
+// file must replace the target instead of being rejected for a missing anchor.
+func TestEditFileHelper_ContentReplacesWholeFile(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	path := filepath.Join(root, "add.go")
+	original := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fixed := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "add.go", "content": fixed},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected a whole-file write, got %q", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != fixed {
+		t.Errorf("file = %q, want %q", got, fixed)
+	}
+}
+
+// a fragment is not a whole file: writing it would delete the package clause
+// and every other function, so it must be refused.
+func TestEditFileHelper_ContentFragmentIsRejected(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "add.go")
+	original := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "add.go", "content": "return a + b"},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if !strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("a fragment must not be written, got %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "not valid Go") {
+		t.Errorf("error = %q, want it to explain content is not a whole file", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Errorf("file was modified: %q", got)
+	}
+}
+
+func TestEditFileHelper_ContentCreatesMissingFile(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	content := "package sub\n"
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "sub/new.go", "content": content},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected the file to be created, got %q", result.Content)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "sub", "new.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != content {
+		t.Errorf("file = %q, want %q", got, content)
+	}
+}
+
+// the create path uses O_EXCL so a file that appears while the approval prompt
+// is waiting cannot be clobbered. The guard must stay on the create path only:
+// replacing a file that already existed at read time is the common shape and
+// must not trip it.
+func TestEditFileHelper_CreateRaceDoesNotClobber(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "appeared.txt")
+	userBytes := "written by the user\n"
+
+	old := Approve
+	Approve = func(kind string) bool {
+		if err := os.WriteFile(path, []byte(userBytes), 0o644); err != nil {
+			t.Errorf("seeding the race: %v", err)
+		}
+		return true
+	}
+	t.Cleanup(func() { Approve = old })
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "appeared.txt", "content": "from the model\n"},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if !strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("a file created during the prompt must not be overwritten, got %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "file was created after the edit was proposed") {
+		t.Errorf("error = %q, want the race message", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != userBytes {
+		t.Errorf("file = %q, want the user's bytes untouched", got)
+	}
+}
+
+// models also use "text" for the whole file; it must take the same path.
+func TestEditFileHelper_TextIsWholeFile(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	content := "hello\n"
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "notes.txt", "text": content},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected text to be accepted as a whole file, got %q", result.Content)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "notes.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != content {
+		t.Errorf("file = %q, want %q", got, content)
+	}
+}
+
+// replacing an existing file with nothing is never intended, so it is refused.
+func TestEditFileHelper_ContentEmptyOverExistingFileIsRejected(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	original := "keep me\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "notes.txt", "content": ""},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if !strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected an empty content to be refused, got %q", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Errorf("file was modified: %q", got)
+	}
+}
+
+// a call with no payload at all must explain both shapes, not just old_text.
+func TestEditFileHelper_MissingPayloadNamesBothModes(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "a.go")
+	if err := os.WriteFile(path, []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{Name: "edit_file", Arguments: map[string]any{"path": "a.go"}},
+	}
+	result := editFileHelper(call, root)
+
+	if !strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected an error, got %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "edit_file with only path") {
+		t.Errorf("error should say a bare path does nothing, got %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "content") {
+		t.Errorf("error should name the whole-file mode, got %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "Nothing was changed") {
+		t.Errorf("error should say the file is untouched, got %q", result.Content)
+	}
+}
+
 // a missing key and a key sent with the wrong JSON type are different mistakes,
 // so the model has to be told which one it made.
 func TestEditFileHelper_DistinguishesMissingFromWrongType(t *testing.T) {
@@ -498,6 +712,157 @@ func TestEditFileHelper_RejectsBadOldText(t *testing.T) {
 				t.Errorf("file should be untouched, got %q", got)
 			}
 		})
+	}
+}
+
+// a payload a model double-encoded gets decoded, but only when the shape is
+// unambiguous: no real line break anywhere and at least one \n escape.
+func TestRepairEscapes(t *testing.T) {
+	cases := map[string]struct {
+		in   string
+		want string
+	}{
+		"escaped whole file": {
+			in:   `package fixture\n\nfunc F() {}\n`,
+			want: "package fixture\n\nfunc F() {}\n",
+		},
+		"escaped indentation": {
+			in:   `func F() {\n\treturn 1\n}`,
+			want: "func F() {\n\treturn 1\n}",
+		},
+		"escaped quotes": {
+			in:   `func F() {\n\tfmt.Println(\"hi\")\n}`,
+			want: "func F() {\n\tfmt.Println(\"hi\")\n}",
+		},
+		"already real newlines": {
+			in:   "package fixture\n\nfunc F() {}\n",
+			want: "package fixture\n\nfunc F() {}\n",
+		},
+		"one line snippet without escapes": {
+			in:   "return a + b",
+			want: "return a + b",
+		},
+		// mixed shape is left alone on purpose: real newlines mean the text is
+		// genuine, so a remaining \n is more likely to belong there.
+		"mixed shape": {
+			in:   "func F() {\n\ts := `a\\nb`\n}\n",
+			want: "func F() {\n\ts := `a\\nb`\n}\n",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := repairEscapes(tc.in); got != tc.want {
+				t.Errorf("repairEscapes(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// the over-escaped shape llama3.1 sends must apply as a real snippet edit.
+// old_text has to be decoded too or the anchor never matches the file.
+func TestEditFileHelper_RepairsEscapedSnippet(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	path := filepath.Join(root, "add.go")
+	original := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name: "edit_file",
+			Arguments: map[string]any{
+				"path":     "add.go",
+				"old_text": `package fixture\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n`,
+				"new_text": `package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n`,
+			},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected the escaped payload to be repaired, got %q", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+	if string(got) != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditFileHelper_RepairsEscapedContent(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	path := filepath.Join(root, "add.go")
+	original := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name: "edit_file",
+			Arguments: map[string]any{
+				"path":    "add.go",
+				"content": `package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n`,
+			},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected the escaped whole file to be repaired, got %q", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+	if string(got) != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+// a genuine multi-line payload keeps a literal backslash-n inside a Go string
+// literal. Repair must not touch text that already has real newlines.
+func TestEditFileHelper_KeepsNewlineInsideGoString(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	path := filepath.Join(root, "a.go")
+	original := "package fixture\n\nfunc A() {}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name: "edit_file",
+			Arguments: map[string]any{
+				"path":     "a.go",
+				"old_text": "func A() {}",
+				"new_text": "func A() {\n\ts := \"a\\nb\"\n\t_ = s\n}",
+			},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected a successful edit, got %q", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), `s := "a\nb"`) {
+		t.Errorf("literal backslash-n inside the string was decoded, file = %q", got)
 	}
 }
 

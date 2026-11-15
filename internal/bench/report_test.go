@@ -355,7 +355,7 @@ func TestFormatMarkdown_Cells(t *testing.T) {
 	want := map[string]string{
 		"Model": "m", "Task": "t", "N": "2", "Pass": "1/2",
 		"ok/max/fail/err": "2/0/0/0", "timeout/unreach": "0/0", "No-edit claims": "1", "Tampered": "0",
-		"Calls/run": "2.0", "Tool errors": "0", "Unnecessary/run": "-",
+		"Calls/run": "2.0", "Tool errors": "0", "Edit fails mal/anc/oth": "0/0/0", "Unnecessary/run": "-",
 		"Wall s (median, range)": "2.5 (2.0-3.0)", "Prompt tok/run": "1500",
 	}
 	for col, w := range want {
@@ -397,6 +397,44 @@ func TestFormatMarkdown_ShowsTransportFailures(t *testing.T) {
 	}
 	if got := rows[0]["ok/max/fail/err"]; got != "0/0/0/0" {
 		t.Errorf("ok/max/fail/err = %q, want 0/0/0/0", got)
+	}
+}
+
+func TestFormatToolErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		in   map[string]int
+		want string
+	}{
+		{"no errors", nil, "0"},
+		{"only zero counts", map[string]int{"edit_file": 0}, "0"},
+		{"one tool", map[string]int{"edit_file": 20}, "20 (edit_file 20)"},
+		{"biggest first", map[string]int{"read_file": 6, "edit_file": 10}, "16 (edit_file 10, read_file 6)"},
+		{"ties by name", map[string]int{"read_file": 1, "echo": 1, "edit_file": 1}, "3 (echo 1, edit_file 1, read_file 1)"},
+		{"invented tool names stay verbatim", map[string]int{"write_file": 7, "echo": 1}, "8 (write_file 7, echo 1)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := formatToolErrors(tc.in); got != tc.want {
+				t.Errorf("formatToolErrors = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatMarkdown_ToolErrorBreakdown(t *testing.T) {
+	r := mkResult("m", "t", func(r *Result) {
+		r.ToolErrors = map[string]int{"edit_file": 10, "read_file": 6}
+	})
+	r.Transcript = editToolError(t, "error: file does not exist but old_text is not empty")
+
+	rows := parseTable(t, FormatMarkdown([]Group{{Model: "m", Task: "t", Rows: []Result{r}}}))
+
+	if got := rows[0]["Tool errors"]; got != "16 (edit_file 10, read_file 6)" {
+		t.Errorf("Tool errors = %q", got)
+	}
+	if got := rows[0]["Edit fails mal/anc/oth"]; got != "0/1/0" {
+		t.Errorf("Edit fails = %q, want 0/1/0", got)
 	}
 }
 

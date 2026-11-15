@@ -5,7 +5,8 @@ import (
 )
 
 var All = []ollama.Tool{
-	// this is global(package level) dont edit could be risky just copy if needed
+	// this is global(package level) dont edited it in runtime if wanting to add more tools
+	//make a copy and use that instead
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
@@ -22,7 +23,7 @@ var All = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "read_file",
-			Description: "reads the context of a file and returns it as plain text. Use when the user asks about context of a file or wants you to refer to code/text from a file that is not in the conversation.",
+			Description: "reads the contents of a file and returns it as plain text. Use when the user asks about context of a file or wants you to refer to code/text from a file that is not in the conversation.",
 			Parameters: ollama.Parameters{
 				Type:     "object",
 				Required: []string{"path"},
@@ -38,17 +39,18 @@ var All = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			// Note: the handler rejects "content" with an error that names new_text
-			// (see files.go). content is not an alias: models use it to mean "the
-			// whole file", while new_text means "the lines that replace old_text",
-			// and applying a whole file at a snippet site corrupts the file. The
-			// schema stays the canonical contract and the handler error is the
-			// teaching channel for models that send the wrong key.
+			// Two payload shapes share this tool because small models reach for
+			// both: old_text+new_text replaces a snippet, content replaces the
+			// whole file. content is never a snippet payload — applying a whole
+			// file at a snippet site would splice the file into itself — so when
+			// old_text is present content is still rejected with an error that
+			// teaches new_text. The handler is the teaching channel; the schema
+			// states both modes.
 			Name:        "edit_file",
-			Description: "Edit an existing file by replacing old_text with new_text. To create a new file, pass an empty old_text and put the entire file contents in new_text. old_text must match the file exactly and appear only once. Call read_file first and copy it from the real content.",
+			Description: "Edit a file. A call with only path changes nothing: always include a payload. Two ways to call it: (1) replace a snippet by providing old_text and new_text; (2) replace or create the whole file by providing content. old_text must match the file exactly and appear only once; call read_file first and copy it exactly. For Go files content must be the complete file including the package clause.",
 			Parameters: ollama.Parameters{
 				Type:     "object",
-				Required: []string{"path", "old_text", "new_text"},
+				Required: []string{"path"},
 				Properties: map[string]any{
 					"path": map[string]any{
 						"type":        "string",
@@ -56,11 +58,15 @@ var All = []ollama.Tool{
 					},
 					"old_text": map[string]any{
 						"type":        "string",
-						"description": "The exact text to replace, including whitespace. Must appear exactly once. For a new file, use an empty string '' and new_text becomes the whole file.",
+						"description": "The exact text to replace, copied from read_file output. Keep indentation exactly as shown, including tabs. Must appear exactly once in the file. Use an empty string only when creating a file that does not exist yet.",
 					},
 					"new_text": map[string]any{
 						"type":        "string",
-						"description": "The replacement text. This is the entire new contents.",
+						"description": "The replacement text for old_text. Only the lines that replace old_text, not the whole file. Use content instead to replace the entire file.",
+					},
+					"content": map[string]any{
+						"type":        "string",
+						"description": "The complete new contents of the whole file. Use this instead of old_text/new_text to replace or create a file. Must include the package clause for Go files.",
 					},
 				},
 			},

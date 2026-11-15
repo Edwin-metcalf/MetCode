@@ -34,11 +34,16 @@ type Agent struct {
 	Stats func(TurnStats)
 	// silences the per-call log; bench sets it so a run prints only its JSON line
 	Quiet bool
+	// ExpectEdit asks for one nudge when a turn ends without a successful
+	// edit_file. It is opt-in because only the caller knows whether the prompt
+	// was supposed to change a file; chat chit-chat must never be nudged.
+	ExpectEdit bool
 }
 
 type TurnStats struct {
 	Calls        int
 	Rounds       int
+	Nudges       int
 	PromptTokens int
 	OutputTokens int
 	PrefillTime  time.Duration
@@ -141,6 +146,17 @@ func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error
 
 }
 
+// recordResponse runs a model message through the cleanup every response needs
+// and appends it to history. All three response sites (first, tool round, nudge)
+// go through here, or a call shape recovered at one site is lost at another.
+func (a *Agent) recordResponse(history *[]ollama.Message, resp ollama.ChatResponse) ollama.ChatResponse {
+	resp.Message = firstCallOnly(resp.Message)
+	resp.Message = canonicalizeNativeCalls(resp.Message)
+	resp.Message = a.normalizeMessage(resp.Message)
+	*history = append(*history, resp.Message)
+	return resp
+}
+
 func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *TurnStats) (string, error) {
 	//turns user input to history and runs the model tool loop until we have an anser without a tool call
 
@@ -154,48 +170,77 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 	}
 	logCall(stats, resp, a.Quiet)
 
-	resp.Message = firstCallOnly(resp.Message)
-	resp.Message = a.normalizeMessage(resp.Message)
-	*history = append(*history, resp.Message)
+	resp = a.recordResponse(history, resp)
 
 	failRounds := 0
+	edited := false
+	nudged := false
+	// the last edit_file failure, quoted back in the nudge. Empty when the model
+	// never called edit_file at all (or only called it successfully).
+	lastEditErr := ""
+	// one shared budget: a nudged attempt cannot double the tool-call allowance
+	rounds := 0
 
-	for round := 0; len(resp.Message.ToolCalls) > 0; round++ {
-		stats.Rounds += 1
-		if round >= maxToolRounds {
-			return "", ErrMaxRounds
-		}
-
-		allFailed := true
-
-		for _, call := range resp.Message.ToolCalls {
-			result := tools.Handle(call, a.Root, &a.Plan)
-
-			if !strings.HasPrefix(result.Content, "error") {
-				allFailed = false
+	for {
+		for len(resp.Message.ToolCalls) > 0 {
+			stats.Rounds += 1
+			if rounds >= maxToolRounds {
+				return "", ErrMaxRounds
 			}
-			*history = append(*history, result)
+			rounds++
+
+			allFailed := true
+
+			for _, call := range resp.Message.ToolCalls {
+				result := tools.Handle(call, a.Root, &a.Plan)
+
+				if !strings.HasPrefix(result.Content, "error") {
+					allFailed = false
+					// A user refusal ("Edit canceled by user") is not an error and
+					// also not a reason to nag the model into trying again.
+					if call.Function.Name == "edit_file" {
+						edited = true
+					}
+				} else if call.Function.Name == "edit_file" {
+					lastEditErr = clip(result.Content, 240)
+				}
+				*history = append(*history, result)
+			}
+
+			if allFailed {
+				failRounds++
+			} else {
+				failRounds = 0
+			}
+
+			if failRounds > maxFailRounds {
+				return "", ErrTooManyFailures
+			}
+
+			resp, err = a.chat(*history, false)
+			if err != nil {
+				return "", err
+			}
+
+			logCall(stats, resp, a.Quiet)
+			resp = a.recordResponse(history, resp)
 		}
 
-		if allFailed {
-			failRounds++
-		} else {
-			failRounds = 0
+		// the model is about to end the turn: nudge once if the caller expected
+		// a file change and none landed. A successful edit ends the turn as usual.
+		if !a.ExpectEdit || edited || nudged {
+			break
 		}
-
-		if failRounds > maxFailRounds {
-			return "", ErrTooManyFailures
-		}
+		nudged = true
+		stats.Nudges += 1
+		*history = append(*history, ollama.Message{Role: "system", Content: editNudgeFor(lastEditErr)})
 
 		resp, err = a.chat(*history, false)
 		if err != nil {
 			return "", err
 		}
-
 		logCall(stats, resp, a.Quiet)
-		resp.Message = firstCallOnly(resp.Message)
-		resp.Message = a.normalizeMessage(resp.Message)
-		*history = append(*history, resp.Message)
+		resp = a.recordResponse(history, resp)
 	}
 	return resp.Message.Content, nil
 

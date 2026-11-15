@@ -104,6 +104,6 @@ Planned fixes, in rough order:
 - Improve ability to grep and find the correct lines to then replace.
 
 ### Data
-- Raw runs: ```bench/published/baseline/results.jsonl```
-- Summary table: ```bench/published/baseline/table.md```
+- Raw runs: ```bench/results/published/baseline/baseline.jsonl```
+- Summary table: ```bench/results/published/baseline/table.md```
 - Commit to check out for reproduction: ```f723d28```
