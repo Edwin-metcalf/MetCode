@@ -58,12 +58,10 @@ func readFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 			Content: "error: no path provided",
 		}
 	}
+	requested := path
 	path, err := resolveSafePath(root, path)
 	if err != nil {
-		return ollama.Message{
-			Role:    "tool",
-			Content: "error: path is possibly dangerous",
-		}
+		return unsafePathError(root, requested, err)
 	}
 	//what to do if null or not the right path need to add error handling
 	//
@@ -99,9 +97,10 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	if isProtected(path) {
 		return ollama.Message{Role: "tool", Content: "error: file is protected"}
 	}
+	requested := path
 	path, err := resolveSafePath(root, path)
 	if err != nil {
-		return ollama.Message{Role: "tool", Content: "error: path is possibly dangerous"}
+		return unsafePathError(root, requested, err)
 	}
 
 	// Two payload shapes share this handler. old_text + new_text replaces a
@@ -386,6 +385,23 @@ func prefixLines(text string, prefix string) string {
 	return strings.Join(lines, "\n")
 }
 
+// errOutsideRoot marks a path that resolves outside the launch directory, whether
+// through ".." or a symlink. unsafePathError turns it into a message the model can act on.
+var errOutsideRoot = errors.New("path is outside the workspace root")
+
+// unsafePathError is the error reply for a path resolveSafePath refused. It names
+// the reason and the root so the model knows how to correct the path.
+func unsafePathError(root string, requestedPath string, err error) ollama.Message {
+	if errors.Is(err, errOutsideRoot) {
+		absRoot, absErr := filepath.Abs(root)
+		if absErr != nil {
+			absRoot = root
+		}
+		return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: %s is outside the workspace root %s. Use a path relative to it.", requestedPath, absRoot)}
+	}
+	return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: %s cannot be used inside the workspace root: %v", requestedPath, err)}
+}
+
 func resolveSafePath(root string, requestedPath string) (string, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -437,7 +453,7 @@ func resolveSafePath(root string, requestedPath string) (string, error) {
 
 	if relativePath == ".." ||
 		strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path escapes root: %s", relativePath)
+		return "", fmt.Errorf("%w: %s", errOutsideRoot, relativePath)
 	}
 
 	// keep the caller's spelling of root, so callers that pass a symlinked root
