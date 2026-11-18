@@ -1047,3 +1047,52 @@ func TestResolveSafePath_AllowsSymlinkInsideRoot(t *testing.T) {
 		t.Errorf("resolved path = %q, want %q", got, want)
 	}
 }
+
+func TestReadFileHelper_OutsideRootNamesReason(t *testing.T) {
+	root := t.TempDir()
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "read_file",
+			Arguments: map[string]any{"path": "../secret.txt"},
+		},
+	}
+	msg := readFileHelper(call, root)
+	if !strings.Contains(msg.Content, "is outside the workspace root") {
+		t.Errorf("expected message to name the reason, got %q", msg.Content)
+	}
+}
+
+func TestEditFileHelper_OutsideRootNamesReason(t *testing.T) {
+	root := t.TempDir()
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "../outside.go", "old_text": "foo", "new_text": "bar"},
+		},
+	}
+	msg := editFileHelper(call, root)
+	if !strings.Contains(msg.Content, "is outside the workspace root") {
+		t.Errorf("expected message to name the reason, got %q", msg.Content)
+	}
+}
+
+func TestReadFileHelper_SymlinkEscapeNamesReason(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "read_file",
+			Arguments: map[string]any{"path": "escape/secret.txt"},
+		},
+	}
+	msg := readFileHelper(call, root)
+	if !strings.Contains(msg.Content, "is outside the workspace root") {
+		t.Errorf("expected symlink escape to name the reason, got %q", msg.Content)
+	}
+}

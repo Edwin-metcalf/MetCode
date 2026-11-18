@@ -26,8 +26,8 @@ func TestClassifyEditError_Literals(t *testing.T) {
 		"error: file does not exist but old_text is not empty":                                        EditFailAnchor,
 		"error: old_text not found in file. Call read_file and copy old_text":                         EditFailAnchor,
 		"error: old_text matches multiple locations (or is empty but the file is not). Include more":  EditFailAnchor,
-		"error: file is protected":          EditFailOther,
-		"error: path is possibly dangerous": EditFailOther,
+		"error: file is protected": EditFailOther,
+		"error: x.txt is outside the workspace root /w. Use a path relative to it.": EditFailOther,
 		"error: finding file: boom":         EditFailOther,
 		"error: something nobody wrote yet": EditFailOther,
 	}
