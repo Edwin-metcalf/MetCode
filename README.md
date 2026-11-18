@@ -150,6 +150,14 @@ export OLLAMA_HOST=http://<ollama-machine-ip>:11434
 source ~/.zshrc
 ```
 
+You can also override the host for a single run:
+
+```bash
+metcode --host http://<ollama-machine-ip>:11434
+```
+
+Host precedence is `--host`, then `OLLAMA_HOST` (whether exported in your shell or loaded from `.env`), then `http://localhost:11434`.
+
 Ollama only listens on localhost by default. Therefore to connect from another machine we have to force it to allow remote connections. This is what I did to open up all connections (I am sure there is a better way but this worked for me)
 
 Run this on the machine with Ollama (important part is putting the service and environment into the config)

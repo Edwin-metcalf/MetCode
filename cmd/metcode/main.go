@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +15,8 @@ import (
 	"github.com/Edwin-metcalf/MetCode/internal/ui"
 	"github.com/joho/godotenv"
 )
+
+const defaultHost = "http://localhost:11434"
 
 // version is set at build time with:
 //
@@ -41,20 +45,49 @@ func printVersion(w io.Writer) {
 	fmt.Fprintln(w, resolveVersion())
 }
 
+// parseHostFlag reads the --host override. Go's flag package also accepts
+// --host=value and the single-dash spelling.
+func parseHostFlag(args []string) (string, error) {
+	fs := flag.NewFlagSet("metcode", flag.ContinueOnError)
+	host := fs.String("host", "", "ollama URL (default: OLLAMA_HOST, then "+defaultHost+")")
+	if err := fs.Parse(args); err != nil {
+		return "", err
+	}
+	return *host, nil
+}
+
+// resolveHost applies the documented precedence: --host, then OLLAMA_HOST
+// (including values loaded from .env), then the local default.
+func resolveHost(flagHost, envHost string) string {
+	if flagHost != "" {
+		return flagHost
+	}
+	if envHost != "" {
+		return envHost
+	}
+	return defaultHost
+}
+
 func main() {
-	if wantsVersion(os.Args[1:]) {
+	args := os.Args[1:]
+	if wantsVersion(args) {
 		printVersion(os.Stdout)
 		return
+	}
+
+	flagHost, err := parseHostFlag(args)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
+		os.Exit(2)
 	}
 
 	if err := godotenv.Load(); err != nil {
 		log.Println("no .env file found, using default local host")
 	}
 
-	host := os.Getenv("OLLAMA_HOST")
-	if host == "" {
-		host = "http://localhost:11434"
-	}
+	host := resolveHost(flagHost, os.Getenv("OLLAMA_HOST"))
 
 	workingDir, err := os.Getwd()
 	if err != nil {
