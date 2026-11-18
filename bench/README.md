@@ -123,28 +123,30 @@ The prompt says "do not edit the test file" because the tamper check is byte for
 
 ## Results and studies
 
-Scratch runs are disposable and git-ignored:
+There are two places results live, and the difference matters:
 
 ```
-bench/results/20261029-210253-32329592.jsonl    # scratch, ignored
-bench/results/studies/baseline-1/runs.jsonl     # a study (see the gitignore note below)
-bench/results/studies/baseline-1/table.md
+bench/results/studies/<name>/       # local scratch, git-ignored
+bench/results/published/<name>/     # committed, shows up on GitHub
 ```
 
-Publish a run as `bench/results/studies/<name>/` with three files: the `runs.jsonl`, the generated `table.md`, and a short `README.md` saying what changed (branch, hypothesis, models, host, date). The table alone does not say what you were testing, and the JSONL is the data the table was derived from, so keep both.
+`studies/` is for the day-to-day one-change-at-a-time runs: hypotheses, repeats, and things that get reverted. It is ignored by `.gitignore`, so nothing there is published and you can keep as many scratch runs as you want. The full study ledger lives in `bench/results/studies/README.md`, also local only.
+
+When a run is worth keeping, publish it under `bench/results/published/<name>/` with three files: `runs.jsonl`, the generated `table.md`, and a `README.md` saying what changed (branch, hypothesis, models, host, date). The table alone does not say what you were testing, and the JSONL is the data the table was derived from, so keep both. Everything under `published/` is un-ignored and committable.
+
+The published runs so far are [baseline](results/published/baseline/README.md) and [baselinePlus](results/published/baselinePlus/README.md). baselinePlus is the n=20 reference run and the one to compare future changes against.
 
 ```bash
-go run ./cmd/metbench report bench/results/studies/<name>/runs.jsonl > bench/results/studies/<name>/table.md
+go run ./cmd/metbench report bench/results/published/<name>/runs.jsonl > bench/results/published/<name>/table.md
 ```
 
-A published study is a historical artifact: regenerate to a new path instead of overwriting a `table.md`
-that a published folder already points at.
+A published study is a historical artifact: regenerate to a new path instead of overwriting a `table.md` that a published folder already points at.
 
-Heads up: `.gitignore` currently ignores `bench/results/*` and only un-ignores top level `baseline-*.jsonl` and `ablation-*.jsonl`. A study under `bench/results/studies/` is ignored along with everything else, so add a rule for it before you try to commit one, or `git status` will look clean when it is not. 
+`.gitignore` ignores `bench/results/*`, then un-ignores `bench/results/published` and everything under it. It also still un-ignores the old top-level `baseline-*.jsonl` and `ablation-*.jsonl` scratch outputs. A folder under `studies/` stays local no matter what you name it. 
 
 ## Known limitations
 
-- **Small N, one machine, no seed.** Temperature is fixed at 0.2 but there is no seed, so runs vary. Every number here is preliminary.
+- **No seed, one machine.** Temperature is fixed at 0.2 but there is no seed, so runs vary. Treat N=5 as a smoke test and the published n=20 run as the current reference.
 - **One turn per task.** The model never gets a second chance after a failing test, which is exactly where a lot of real agent value lives. Pass rates here are lower than what an iterating agent would get.
 - **Tests are the whole spec.** A model can pass by gutting the function to satisfy the test cases rather than fixing the bug. That is why tasks are written with a few edge cases, but nothing checks intent.
 - **Only top-level `*_test.go` is tamper checked.** A nested test file under `files/` is copied but not compared, so it could be edited without being flagged.

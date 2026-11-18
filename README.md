@@ -24,9 +24,6 @@ Local AI. Your Terminal. Your machines.
 - [The Small Model Project](#the-small-model-project)
 - [Benchmark harness](#benchmark-harness)
 - [Model notes](#model-notes)
-    - [qwen2.5-coder:7b](#qwen25-coder7b)
-    - [llama3.1:latest](#llama31latest)
-    - [Which to use](#which-to-use)
 - [Setup Guide](#setup-guide)
 - [Commands](#commands)
 - [Model Safeguards](#model-safeguards)
@@ -72,14 +69,14 @@ MetCode thrives on getting the most out of small models that are run offline. Fo
 Steps this project has taken to optimize small model performance:
 
 - Recovering tool calls small models write as plain text or in malformed ways
-- Compact tool definitions (folded creat_file into edit_file, saving a model round trip and context tokens)
+- Compact tool definitions (folded create_file into edit_file, saving a model round trip and context tokens)
 - Context-aware compaction: history is flattened into a plain-text transcript and summarized in a single call. Built so Tool calls, file paths, and important information are visible regardless of chat template
     - Long tool results are trimmed to their head and tail (errors and file starts survive), and call arguments if re-read is needed
 
 
 The project is currently working toward:
 
-- Better prompts for 7-8B coding models (or smaller even)
+- Harness-level guidance that doesn't depend on prompt wording
 - Efficient context management
 - Better tool outputs
 - Reduce unnecessary tool calls and context clutter
@@ -98,46 +95,17 @@ go run ./cmd/metbench run -models qwen2.5-coder:7b -n 5     # one JSON line per 
 go run ./cmd/metbench report bench/results/<run>.jsonl      # print a table
 ```
 
-`metbench` is a separate binary on purpose: it auto-approves edits inside a throwaway workspace, and that must never exist in the shipped `metcode`. Results so far are preliminary (small N, one machine, no fixed seed). See [bench/README.md](bench/README.md) for setup, how to add a task, and how to read the table.
+`metbench` is a separate binary on purpose: it auto-approves edits inside a throwaway workspace, and that must never exist in the shipped `metcode`. Published results live under `bench/results/published/`: the original [baseline](bench/results/published/baseline/README.md) and the [baselinePlus reference run](bench/results/published/baselinePlus/README.md) at n=20. It is still one machine with no fixed seed, so read the per-task tables rather than the totals. See [bench/README.md](bench/README.md) for setup, how to add a task, and how to read the table.
 
 ## Model notes
 
-Model choice affects MetCode more than any prompt or tool tweak measured so far. The two models used most with MetCode in development are
-qwen2.5-coder:7b and llama3.1:latest. Both run on the test machine (Ubuntu GPU: Nvidia 1080) with `num_ctx=8192`.
+Model choice affects MetCode more than any prompt or tool tweak measured so far. The two models used most in development are `qwen2.5-coder:7b` and `llama3.1:latest`. Both run on the test machine (Ubuntu GPU: Nvidia 1080) with `num_ctx=8192`.
 
-| Model              | Unnecessary tool calls | Calls a tool when asked | Prefill per turn                |
-| ------------------ | ---------------------- | ----------------------- | ------------------------------- |
-| `qwen2.5-coder:7b` | 0 / 6                  | unreliable              | ~50ms (only turn 1 is uncached) |
-| `llama3.1:latest`  | 5 / 6                  | reliable                | ~1.3s (on a fresh prompt)       |
+The short version: greeting is no longer a differentiator, both models answered 40/40 with no tool calls in the reference run. What differs is which edits they can actually land. llama does great on `add-bug` (19/20) and `add-bug-descriptive` (20/20) but only 1/20 on `change-constant`. qwen is close to the mirror image: 17/20 on `change-constant`, 8/20 on `missing-function`, but 4/20 on `add-bug`. Both went 0/20 on `discount-two-files` and `two-bugs`.
 
-### qwen2.5-coder:7b
+Use `qwen2.5-coder:7b` for speed and change-constant-style edits, `llama3.1:latest` when a tool call needs to just happen, and expect to watch both closely on multi-file or multi-bug tasks.
 
-Strengths
-
-- Tool restraint: greetings and small talk get direct answers. Asked "hello" and "what is 2 + 2" it answered directly every time, with no extra round trip and no approval prompt.
-- Speed: reuses the prompt cache across turns, so only the first turn pays full prefill (~1.5s). Later turns prefill in ~45-90ms, making it several times faster end to end.
-
-Weaknesses
-
-- Tool calls are unreliable. It often answers with the code or an explanation instead of invoking a tool, and may need to be pushed ("actually use the tool") before it calls one.
-- When it does write a call as plain text, it sometimes wraps it in a markdown code fence, which MetCode's recovery currently misses.
-
-### llama3.1:latest
-
-Strengths
-
-- Reliable tool use. When a tool is needed it calls the right one on the first try. Listing a directory, editing a file, and running a command all worked without prompting.
-- Natural replies. Its final plain-text answers read well, so an unnecessary call is easy to miss unless you watch the `[tool]` lines.
-
-Weaknesses
-
-- Over-calls. It reaches for `list_directory` or `read_file` on greetings, thanks, and small talk, even right after being told no calls were needed. Each one costs an extra model round trip and an approval prompt.
-- No prompt caching: it pays ~1.3s of prefill on every call, so its turns are roughly 7x slower.
-
-### Which to use
-
-- `qwen2.5-coder:7b` is the recommended default for speed and restraint, with the caveat that tool calls sometimes need a nudge.
-- `llama3.1:latest` is the better pick when tool use needs to just work and you can accept the extra calls and the slower turns.
+For the full per-task table, failure shapes, and what we learned from it, see the published reference run: [baselinePlus](bench/results/published/baselinePlus/README.md). The earlier [baseline](bench/results/published/baseline/README.md) is there for comparison, but they used different prompt hashes and N, so don't read the gap as a controlled before/after.
 
 ## Setup Guide
 
@@ -231,7 +199,7 @@ Type any of these at the prompt (not sent to the model):
 | `/change-model` | Lists models available on your Ollama server and lets you switch                        |
 | `/save`         | Saves the current conversation. Prompts for a name the first time; reuses it after that |
 | `/load`         | Lists saved conversations and lets you pick one to resume                               |
-| `/clear`        | Clears the current conversation, keeping only the system prompt                         |
+| `/clear`        | Clears the current conversation and the current plan, keeping only the system prompt    |
 | `/compact`      | Summarizes the conversation to free up context (keeps file paths, decisions, errors)    |
 
 ---
@@ -281,7 +249,7 @@ Each fixture under `bench/tasks` has its own `go.mod`, so `go build ./...` and `
 
 - Metcode recovers from small models hallucinating tool calls or producing malformed tool calls. However we are not perfect and errors may still occur.
 - Only the first tool call per assistant message is executed; extras are dropped
-- Creating a file uses `edit_file` with and empty old_text. An existing file is only changed when old_text matches exactly once, so a normal edit never truncates it.
+- Creating a file uses `edit_file` with an empty old_text. An existing file is only changed when old_text matches exactly once, so a normal edit never truncates it.
 - An edit rewrites the whole file after you confirm, so changes made to the file while the confirmation is pending are overwritten.
 - `run_command` and file tools are jailed to the launch directory (lexically; see Model Safeguards).
 - Editing the repo's `system_prompt.md` won't affect users who already ran MetCode once
