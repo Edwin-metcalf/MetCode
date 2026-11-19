@@ -2,14 +2,14 @@ package bench
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Edwin-metcalf/MetCode/internal/verify"
 )
 
 const defaultTimeoutSec = 100
@@ -95,37 +95,17 @@ func testFilesTampered(t Task, workspace string) (bool, error) {
 	return false, nil
 }
 
-// a helper that runs the test in the workspace
+// runTestCmd runs the task's test command in the workspace.
 func runTestCmd(t Task, workspace string) (passed bool, output string, err error) {
 	timeout := defaultTimeoutSec
 	if t.TimeoutSec > 0 {
 		timeout = t.TimeoutSec
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-	defer cancel()
+	res := verify.Runner{
+		Command: t.TestCmd,
+		Timeout: time.Duration(timeout) * time.Second,
+	}.Run(workspace)
 
-	cmd := exec.CommandContext(ctx, t.TestCmd[0], t.TestCmd[1:]...)
-	cmd.Dir = workspace
-
-	out, err := cmd.CombinedOutput()
-	output = string(out)
-
-	if err == nil {
-		return true, output, nil
-	}
-
-	//timed out case
-	if ctx.Err() == context.DeadlineExceeded {
-		return false, output, nil
-	}
-
-	//test failed a verdict case
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return false, output, nil
-	}
-
-	// could not start harness
-	return false, "", err
+	return res.Passed, res.Output, res.Err
 }

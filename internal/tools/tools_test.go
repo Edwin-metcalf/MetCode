@@ -336,10 +336,8 @@ func TestEditFileHelper_ContentReplacesWholeFile(t *testing.T) {
 	}
 }
 
-// qwen2.5-coder sends the fixed file in new_text with no old_text. That has the
-// same whole-file intent as content, so it must be written instead of refused
-// for a missing anchor. baselinePlus had 31 of these refusals, 7 carrying the
-// correct add.go.
+// qwen sends the fixed file in new_text with no old_text. That is a whole-file
+// write, not a missing anchor; baselinePlus refused 31 of these.
 func TestEditFileHelper_NewTextWithoutOldTextReplacesWholeFile(t *testing.T) {
 	feedStdin(t, "y\n")
 
