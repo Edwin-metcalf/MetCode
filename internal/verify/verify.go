@@ -14,6 +14,7 @@ const (
 )
 
 type Result struct {
+	Command  []string
 	Passed   bool
 	Output   string
 	Duration time.Duration
@@ -25,6 +26,9 @@ type Runner struct {
 	Timeout   time.Duration
 	MaxOutput int
 }
+
+// Func is the agent hook shape; Runner.Run satisfies it.
+type Func func(workdir string) Result
 
 func (r Runner) Run(workdir string) Result {
 	start := time.Now()
@@ -49,7 +53,7 @@ func (r Runner) Run(workdir string) Result {
 	cmd.Dir = workdir
 	out, err := cmd.CombinedOutput()
 
-	res := Result{Output: clip(string(out), maxOutput), Duration: time.Since(start)}
+	res := Result{Command: r.Command, Output: clip(string(out), maxOutput), Duration: time.Since(start)}
 	// Timeouts and non-zero exits are verdicts. Only a start failure is an Err.
 	var exitErr *exec.ExitError
 	switch {

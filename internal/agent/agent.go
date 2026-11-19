@@ -12,11 +12,13 @@ import (
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
 	"github.com/Edwin-metcalf/MetCode/internal/plan"
 	"github.com/Edwin-metcalf/MetCode/internal/tools"
+	"github.com/Edwin-metcalf/MetCode/internal/verify"
 )
 
 const (
-	maxToolRounds = 12
-	maxFailRounds = 3
+	maxToolRounds     = 12
+	maxFailRounds     = 3
+	maxVerifyAttempts = 2
 )
 
 var (
@@ -38,18 +40,25 @@ type Agent struct {
 	// edit_file. It is opt-in because only the caller knows whether the prompt
 	// was supposed to change a file; chat chit-chat must never be nudged.
 	ExpectEdit bool
+	// Verify runs after an applied edit; nil disables it.
+	Verify verify.Func
+	// VerifyReport prints each verification result to the CLI.
+	VerifyReport func(verify.Result)
 }
 
 type TurnStats struct {
-	Calls        int
-	Rounds       int
-	Nudges       int
-	PromptTokens int
-	OutputTokens int
-	PrefillTime  time.Duration
-	GenTime      time.Duration
-	LoadTime     time.Duration
-	WallTime     time.Duration
+	Calls          int
+	Rounds         int
+	Nudges         int
+	VerifyAttempts int
+	VerifyPassed   bool
+	VerifyMS       time.Duration
+	PromptTokens   int
+	OutputTokens   int
+	PrefillTime    time.Duration
+	GenTime        time.Duration
+	LoadTime       time.Duration
+	WallTime       time.Duration
 }
 
 // exported to bench
@@ -174,6 +183,8 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 
 	failRounds := 0
 	edited := false
+	pendingVerify := false
+	verifyAttempts := 0
 	nudged := false
 	// the last edit_file failure, quoted back in the nudge. Empty when the model
 	// never called edit_file at all (or only called it successfully).
@@ -200,6 +211,9 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 					// also not a reason to nag the model into trying again.
 					if call.Function.Name == "edit_file" {
 						edited = true
+						if result.Content != "Edit canceled by user" {
+							pendingVerify = true
+						}
 					}
 				} else if call.Function.Name == "edit_file" {
 					lastEditErr = clip(result.Content, 240)
@@ -224,6 +238,45 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 
 			logCall(stats, resp, a.Quiet)
 			resp = a.recordResponse(history, resp)
+		}
+
+		// Verify only after a real edit, and only when a new edit needs checking.
+		if a.Verify != nil && pendingVerify && verifyAttempts < maxVerifyAttempts {
+			verifyAttempts++
+			pendingVerify = false
+
+			res := a.Verify(a.Root)
+			stats.VerifyAttempts++
+			stats.VerifyMS += res.Duration
+			if a.VerifyReport != nil {
+				a.VerifyReport(res)
+			}
+
+			if res.Err != nil {
+				*history = append(*history, ollama.Message{Role: "system", Content: verificationErrorMessage(res)})
+				break
+			}
+			if res.Passed {
+				stats.VerifyPassed = true
+				break
+			}
+
+			if verifyAttempts >= maxVerifyAttempts {
+				*history = append(*history, ollama.Message{Role: "system", Content: verificationLimitMessage(res)})
+				break
+			}
+			*history = append(*history, ollama.Message{Role: "system", Content: verificationFailureMessage(res)})
+			if rounds >= maxToolRounds {
+				return "", ErrMaxRounds
+			}
+			rounds++
+			resp, err = a.chat(*history, false)
+			if err != nil {
+				return "", err
+			}
+			logCall(stats, resp, a.Quiet)
+			resp = a.recordResponse(history, resp)
+			continue
 		}
 
 		// the model is about to end the turn: nudge once if the caller expected
