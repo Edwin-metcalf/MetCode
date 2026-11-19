@@ -65,6 +65,12 @@ func readFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 	}
 	//what to do if null or not the right path need to add error handling
 	//
+	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
+		return ollama.Message{
+			Role:    "tool",
+			Content: fmt.Sprintf("error: %s is a directory. Use list_directory to see what is in it.", requested),
+		}
+	}
 	fileContentBytes, err := os.ReadFile(path)
 	if err != nil {
 		// dont need to log fatal but need to handle if we cant read from that path
