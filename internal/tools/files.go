@@ -129,6 +129,16 @@ func editFileHelper(call *ollama.ToolCall, root string) ollama.Message {
 		case argWrongType:
 			return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: %s must be a string, not a different JSON type", wholeKey)}
 		}
+		// qwen often sends a complete file in new_text with no old_text. That is
+		// the whole-file intent, not a forgotten anchor, so take it through the
+		// same validated write path as content. A fragment still hits the old
+		// error below, which keeps the edit-failure classifier honest.
+		if newText, st := stringArg(call.Function.Arguments, "new_text"); st == argFound {
+			newText = repairEscapes(newText)
+			if strings.HasPrefix(strings.TrimSpace(newText), "package ") {
+				return writeWholeFileHelper(path, newText)
+			}
+		}
 		// new_text without old_text is a different mistake from a bare {path}
 		// call: the model tried snippet mode and forgot the anchor. Keeping the
 		// two messages apart is what lets bench/editfails.go classify them.

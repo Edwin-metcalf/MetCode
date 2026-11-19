@@ -336,6 +336,41 @@ func TestEditFileHelper_ContentReplacesWholeFile(t *testing.T) {
 	}
 }
 
+// qwen2.5-coder sends the fixed file in new_text with no old_text. That has the
+// same whole-file intent as content, so it must be written instead of refused
+// for a missing anchor. baselinePlus had 31 of these refusals, 7 carrying the
+// correct add.go.
+func TestEditFileHelper_NewTextWithoutOldTextReplacesWholeFile(t *testing.T) {
+	feedStdin(t, "y\n")
+
+	root := t.TempDir()
+	path := filepath.Join(root, "add.go")
+	original := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fixed := "package fixture\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "edit_file",
+			Arguments: map[string]any{"path": "add.go", "new_text": fixed},
+		},
+	}
+	result := editFileHelper(call, root)
+
+	if strings.HasPrefix(result.Content, "error") {
+		t.Fatalf("expected a whole-file write, got %q", result.Content)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != fixed {
+		t.Errorf("file = %q, want %q", got, fixed)
+	}
+}
+
 // a fragment is not a whole file: writing it would delete the package clause
 // and every other function, so it must be refused.
 func TestEditFileHelper_ContentFragmentIsRejected(t *testing.T) {
