@@ -248,7 +248,8 @@ func TestResultJSONKeys(t *testing.T) {
 		"task", "model", "run_index", "num_ctx", "temperature", "prompt_hash", "git_commit", "ollama_version",
 		"passed", "no_tools", "tampered", "ended", "edit_applied", "final_reply", "transcript",
 		"tool_calls", "tool_errors", "unnecessary_calls", "declined_commands", "grade_output",
-		"rounds", "nudges", "prompt_tokens", "output_tokens", "wall_ms", "load_ms", "prefill_ms", "gen_ms",
+		"rounds", "nudges", "verify_attempts", "verify_passed", "verify_ms",
+		"prompt_tokens", "output_tokens", "wall_ms", "load_ms", "prefill_ms", "gen_ms",
 	}
 	for _, k := range want {
 		if _, ok := got[k]; !ok {
@@ -268,6 +269,7 @@ func TestResultJSONRoundTrip(t *testing.T) {
 		ToolCalls: map[string]int{"read_file": 3}, ToolErrors: map[string]int{"edit_file": 1},
 		UnnecessaryCalls: 4, DeclinedCommands: 5,
 		Rounds: 6, Nudges: 13, PromptTokens: 7, OutputTokens: 8, WallMS: 9,
+		VerifyAttempts: 2, VerifyPassed: true, VerifyMS: 14,
 		LoadMS: 10, PrefillMS: 11, GenMS: 12,
 	}
 	b, err := json.Marshal(in)
@@ -315,6 +317,9 @@ func TestRun_NoOpModelFails(t *testing.T) {
 	}
 	if res.PromptTokens != 20 || res.OutputTokens != 10 {
 		t.Errorf("tokens = %d/%d, want 20/10 (the answer plus one nudged retry)", res.PromptTokens, res.OutputTokens)
+	}
+	if res.VerifyAttempts != 0 || res.VerifyPassed {
+		t.Errorf("a turn with no edit must not verify: attempts=%d passed=%v", res.VerifyAttempts, res.VerifyPassed)
 	}
 	// the same turn proves the no-edit nudge fires once and does not loop
 	if res.Nudges != 1 {
@@ -548,6 +553,56 @@ func TestRun_ScriptedCorrectEditPasses(t *testing.T) { // needs tool schema
 	}
 	if res.ToolCalls[toolEdit] != 1 || total(res.ToolErrors) != 0 {
 		t.Errorf("calls %v errors %v", res.ToolCalls, res.ToolErrors)
+	}
+}
+
+func TestRun_VerifiesAfterEdit(t *testing.T) { // needs tool schema
+	task, _ := newAddWorkspace(t)
+	srv := newFakeOllama(t, toolReply(toolEdit, fixAddArgs), textReply("Fixed Add."))
+
+	res := runTask(t, task, srv)
+
+	if res.VerifyAttempts != 1 || !res.VerifyPassed {
+		t.Errorf("verify attempts=%d passed=%v, want 1/true", res.VerifyAttempts, res.VerifyPassed)
+	}
+	if !res.Passed {
+		t.Errorf("the final grade should pass too: %+v", res)
+	}
+	for _, m := range res.Transcript {
+		if m.Role == "system" && strings.HasPrefix(m.Content, "Verification failed") {
+			t.Error("a passing verification must not add feedback to the transcript")
+		}
+	}
+}
+
+// A failing command feeds output back to the model, but only a new edit buys
+// another attempt. The second failure is the cap, so no third run happens.
+func TestRun_VerifyFailureFeedsBackAndStops(t *testing.T) { // needs tool schema
+	task := loadTask(t, "always-fails", `{"prompt": "Fix Add.", "test_cmd": ["false"]}`,
+		map[string]string{"add.go": addBuggy, "go.mod": addGoMod})
+	noopEdit := map[string]any{"path": "add.go", "old_text": "a + b", "new_text": "a + b"}
+	srv := newFakeOllama(t,
+		toolReply(toolEdit, fixAddArgs), textReply("fixed"),
+		toolReply(toolEdit, noopEdit), textReply("still broken"),
+		textReply("should not be called"),
+	)
+
+	res := runTask(t, task, srv)
+
+	if res.VerifyAttempts != 2 || res.VerifyPassed {
+		t.Errorf("verify attempts=%d passed=%v, want 2/false", res.VerifyAttempts, res.VerifyPassed)
+	}
+	if res.Passed {
+		t.Error("a failing test command must not pass the final grade")
+	}
+	feedback := 0
+	for _, m := range res.Transcript {
+		if m.Role == "system" && strings.HasPrefix(m.Content, "Verification failed") {
+			feedback++
+		}
+	}
+	if feedback != 2 {
+		t.Errorf("verification feedback = %d, want 2", feedback)
 	}
 }
 

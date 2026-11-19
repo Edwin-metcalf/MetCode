@@ -95,17 +95,21 @@ func testFilesTampered(t Task, workspace string) (bool, error) {
 	return false, nil
 }
 
-// runTestCmd runs the task's test command in the workspace.
-func runTestCmd(t Task, workspace string) (passed bool, output string, err error) {
+// verifyRunner builds the runner for both grading and in-turn verification.
+// They must use the same command and timeout so feedback matches the final grade.
+func verifyRunner(t Task) verify.Runner {
 	timeout := defaultTimeoutSec
 	if t.TimeoutSec > 0 {
 		timeout = t.TimeoutSec
 	}
-
-	res := verify.Runner{
+	return verify.Runner{
 		Command: t.TestCmd,
 		Timeout: time.Duration(timeout) * time.Second,
-	}.Run(workspace)
+	}
+}
 
+// runTestCmd runs the task's test command in the workspace.
+func runTestCmd(t Task, workspace string) (passed bool, output string, err error) {
+	res := verifyRunner(t).Run(workspace)
 	return res.Passed, res.Output, res.Err
 }

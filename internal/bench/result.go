@@ -56,14 +56,18 @@ type Result struct {
 	GradeOutput      string         `json:"grade_output"`
 
 	//cost from stats and timer
-	Rounds       int   `json:"rounds"`
-	Nudges       int   `json:"nudges"` //turns where the no-edit nudge fired
-	PromptTokens int   `json:"prompt_tokens"`
-	OutputTokens int   `json:"output_tokens"`
-	WallMS       int64 `json:"wall_ms"`    //whole turn: load + prefill + generation + tool time
-	LoadMS       int64 `json:"load_ms"`    //part of WallMS spent loading the model, from ollama
-	PrefillMS    int64 `json:"prefill_ms"` //part of WallMS spent on prompt eval, from ollama
-	GenMS        int64 `json:"gen_ms"`     //part of WallMS spent generating, from ollama
+	Rounds int `json:"rounds"`
+	Nudges int `json:"nudges"` //turns where the no-edit nudge fired
+	// Verification is feedback only; Passed still comes from Grade.
+	VerifyAttempts int   `json:"verify_attempts"`
+	VerifyPassed   bool  `json:"verify_passed"`
+	VerifyMS       int64 `json:"verify_ms"`
+	PromptTokens   int   `json:"prompt_tokens"`
+	OutputTokens   int   `json:"output_tokens"`
+	WallMS         int64 `json:"wall_ms"`    //whole turn: load + prefill + generation + tool time
+	LoadMS         int64 `json:"load_ms"`    //part of WallMS spent loading the model, from ollama
+	PrefillMS      int64 `json:"prefill_ms"` //part of WallMS spent on prompt eval, from ollama
+	GenMS          int64 `json:"gen_ms"`     //part of WallMS spent generating, from ollama
 }
 
 // summarizes history to find the tool calls and tool_calls that errored
@@ -193,6 +197,11 @@ func Run(task Task, cfg Config) (Result, error) {
 	// without one gets the single no-edit nudge. no_tools tasks (greeting) are
 	// excluded, or the nudge would turn a correct plain answer into a failure.
 	a.ExpectEdit = !task.NoTools
+	// The same command grades the workspace after the turn. NoTools tasks have
+	// nothing to verify, and VerifyReport stays nil so the bench stays quiet.
+	if task.TestCmd != nil && !task.NoTools {
+		a.Verify = verifyRunner(task).Run
+	}
 
 	sys := prompt.Default()
 	history := []ollama.Message{{Role: "system", Content: sys}}
@@ -250,6 +259,8 @@ func Run(task Task, cfg Config) (Result, error) {
 		ToolCalls: calls, ToolErrors: errs,
 		UnnecessaryCalls: unnecessary, DeclinedCommands: declined, GradeOutput: grade.Output,
 		Rounds: stats.Rounds, Nudges: stats.Nudges,
+		VerifyAttempts: stats.VerifyAttempts, VerifyPassed: stats.VerifyPassed,
+		VerifyMS:     stats.VerifyMS.Milliseconds(),
 		PromptTokens: stats.PromptTokens, OutputTokens: stats.OutputTokens,
 		WallMS:    stats.WallTime.Milliseconds(),
 		LoadMS:    stats.LoadTime.Milliseconds(),
