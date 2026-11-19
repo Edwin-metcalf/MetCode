@@ -46,6 +46,26 @@ func TestReadDirectoryHelper_NoPath(t *testing.T) {
 	}
 }
 
+func TestReadFileHelper_DirectoryGivesFriendlyError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	call := &ollama.ToolCall{
+		Function: ollama.CalledFunction{
+			Name:      "read_file",
+			Arguments: map[string]any{"path": "sub"},
+		},
+	}
+
+	result := readFileHelper(call, root)
+
+	want := "error: sub is a directory. Use list_directory to see what is in it."
+	if result.Content != want {
+		t.Errorf("expected %q, got %q", want, result.Content)
+	}
+}
+
 func TestProtectedFiles(t *testing.T) {
 	call := &ollama.ToolCall{
 		Function: ollama.CalledFunction{
