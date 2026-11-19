@@ -9,9 +9,25 @@ import (
 
 	"github.com/Edwin-metcalf/MetCode/internal/conversation"
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
+	"github.com/Edwin-metcalf/MetCode/internal/verify"
 )
 
 func (c *CLI) handleCommand(command string, history *[]ollama.Message) {
+	if command == "/verify" {
+		c.showVerify()
+		return
+	}
+	if command == "/verify off" {
+		c.Agent.Verify = nil
+		c.VerifyCommand = nil
+		fmt.Println("verification disabled")
+		return
+	}
+	if strings.HasPrefix(command, "/verify ") {
+		c.setVerify(strings.TrimSpace(strings.TrimPrefix(command, "/verify ")))
+		return
+	}
+
 	switch command {
 	case "/change-model":
 		c.Agent.Model = c.chooseModel()
@@ -48,10 +64,30 @@ func (c *CLI) handleCommand(command string, history *[]ollama.Message) {
 	- /compact - compacts the current conversation into a smaller summary
 	- /load - Load a past conversation
 	- /save - Save the current conversation to a new conversation or an old one
+	- /verify <command...> - Run a command after edits; /verify off disables it
 			`)
 	default:
 		fmt.Println("That is not a command I currently have try /help")
 	}
+}
+
+func (c *CLI) setVerify(value string) {
+	parts := strings.Fields(value)
+	if len(parts) == 0 {
+		fmt.Println("usage: /verify <command...> or /verify off")
+		return
+	}
+	c.Agent.Verify = verify.Runner{Command: parts}.Run
+	c.VerifyCommand = parts
+	fmt.Println("verification set to:", strings.Join(parts, " "))
+}
+
+func (c *CLI) showVerify() {
+	if len(c.VerifyCommand) == 0 {
+		fmt.Println("verification is off")
+		return
+	}
+	fmt.Println("verification is set to:", strings.Join(c.VerifyCommand, " "))
 }
 
 func (c *CLI) chooseModel() string {

@@ -57,7 +57,7 @@ func TestTurn_VerifiesAfterEdit(t *testing.T) {
 	reports := 0
 	a := &Agent{
 		Model: "test", Host: host, Root: root,
-		Verify: script.run, VerifyReport: func(verify.Result) { reports++ },
+		Verify: script.run, VerifyReport: func(verify.Result, bool) { reports++ },
 	}
 	var stats TurnStats
 	a.Stats = func(s TurnStats) { stats = s }

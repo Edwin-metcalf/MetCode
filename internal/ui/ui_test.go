@@ -2,16 +2,19 @@ package ui
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Edwin-metcalf/MetCode/internal/agent"
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
 	"github.com/Edwin-metcalf/MetCode/internal/plan"
+	"github.com/Edwin-metcalf/MetCode/internal/verify"
 )
 
 // captureStdout runs f and returns everything it printed.
@@ -53,6 +56,79 @@ func TestHandleCommand_UnknownCommandPrintsHint(t *testing.T) {
 
 	if !strings.Contains(out, "/help") {
 		t.Errorf("expected a hint pointing at /help, got %q", out)
+	}
+}
+
+func TestHandleCommand_VerifySetShowOff(t *testing.T) {
+	c := newTestCLI("", "")
+	history := []ollama.Message{c.SystemPrompt}
+
+	out := captureStdout(t, func() {
+		c.handleCommand("/verify go test ./...", &history)
+		c.handleCommand("/verify", &history)
+	})
+
+	if !strings.Contains(out, "verification set to: go test ./...") {
+		t.Errorf("set output = %q", out)
+	}
+	if !strings.Contains(out, "verification is set to: go test ./...") {
+		t.Errorf("show output = %q", out)
+	}
+	if c.Agent.Verify == nil {
+		t.Error("verify hook should be set")
+	}
+	if want := []string{"go", "test", "./..."}; !slices.Equal(c.VerifyCommand, want) {
+		t.Errorf("VerifyCommand = %q, want %q", c.VerifyCommand, want)
+	}
+
+	out = captureStdout(t, func() { c.handleCommand("/verify off", &history) })
+	if !strings.Contains(out, "verification disabled") {
+		t.Errorf("off output = %q", out)
+	}
+	if c.Agent.Verify != nil || c.VerifyCommand != nil {
+		t.Error("verification should be disabled")
+	}
+}
+
+func TestPrintVerify(t *testing.T) {
+	cases := []struct {
+		name  string
+		res   verify.Result
+		final bool
+		want  string
+	}{
+		{
+			name: "pass",
+			res:  verify.Result{Command: []string{"go", "test"}, Passed: true},
+			want: "[verify] go test -> pass",
+		},
+		{
+			name: "fail retrying",
+			res:  verify.Result{Command: []string{"go", "test"}, Output: "FAIL: broken"},
+			want: "[verify] go test -> fail, retrying",
+		},
+		{
+			name:  "fail final",
+			res:   verify.Result{Command: []string{"go", "test"}, Output: "FAIL: broken"},
+			final: true,
+			want:  "[verify] go test -> fail, retry limit reached",
+		},
+		{
+			name: "start error",
+			res:  verify.Result{Command: []string{"go", "test"}, Err: errors.New("boom")},
+			want: "[verify] go test -> error",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := captureStdout(t, func() { printVerify(c.res, c.final) })
+			if !strings.Contains(out, c.want) {
+				t.Errorf("output = %q, want it to contain %q", out, c.want)
+			}
+			if c.res.Output != "" && !strings.Contains(out, c.res.Output) {
+				t.Errorf("output = %q, want test output %q", out, c.res.Output)
+			}
+		})
 	}
 }
 

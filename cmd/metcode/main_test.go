@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 )
 
@@ -46,6 +47,45 @@ func TestParseHostFlag(t *testing.T) {
 				t.Errorf("parseHostFlag(%v) = %q, want %q", c.args, got, c.want)
 			}
 		})
+	}
+}
+
+func TestParseFlags(t *testing.T) {
+	cases := []struct {
+		name   string
+		args   []string
+		host   string
+		verify string
+	}{
+		{name: "no args"},
+		{name: "host only", args: []string{"--host", "http://flag:11434"}, host: "http://flag:11434"},
+		{name: "verify only", args: []string{"--verify", "go test ./..."}, verify: "go test ./..."},
+		{name: "both", args: []string{"--host=http://flag:11434", "--verify=go test ./..."}, host: "http://flag:11434", verify: "go test ./..."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := parseFlags(c.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Host != c.host || got.Verify != c.verify {
+				t.Errorf("parseFlags(%v) = %+v, want host=%q verify=%q", c.args, got, c.host, c.verify)
+			}
+		})
+	}
+}
+
+func TestParseVerifyCommand(t *testing.T) {
+	got, err := parseVerifyCommand("go test ./...")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"go", "test", "./..."}; !slices.Equal(got, want) {
+		t.Errorf("parseVerifyCommand = %q, want %q", got, want)
+	}
+
+	if _, err := parseVerifyCommand("   "); err == nil {
+		t.Error("want an error for a whitespace-only command")
 	}
 }
 

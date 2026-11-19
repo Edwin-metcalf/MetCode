@@ -43,7 +43,7 @@ type Agent struct {
 	// Verify runs after an applied edit; nil disables it.
 	Verify verify.Func
 	// VerifyReport prints each verification result to the CLI.
-	VerifyReport func(verify.Result)
+	VerifyReport func(verify.Result, bool)
 }
 
 type TurnStats struct {
@@ -246,10 +246,11 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 			pendingVerify = false
 
 			res := a.Verify(a.Root)
+			final := verifyAttempts >= maxVerifyAttempts
 			stats.VerifyAttempts++
 			stats.VerifyMS += res.Duration
 			if a.VerifyReport != nil {
-				a.VerifyReport(res)
+				a.VerifyReport(res, final)
 			}
 
 			if res.Err != nil {
@@ -261,7 +262,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 				break
 			}
 
-			if verifyAttempts >= maxVerifyAttempts {
+			if final {
 				*history = append(*history, ollama.Message{Role: "system", Content: verificationLimitMessage(res)})
 				break
 			}

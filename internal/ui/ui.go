@@ -11,6 +11,7 @@ import (
 
 	"github.com/Edwin-metcalf/MetCode/internal/agent"
 	"github.com/Edwin-metcalf/MetCode/internal/ollama"
+	"github.com/Edwin-metcalf/MetCode/internal/verify"
 )
 
 const banner = `
@@ -22,15 +23,17 @@ const banner = `
 	`
 
 type CLI struct {
-	Scanner      *bufio.Scanner
-	Agent        *agent.Agent
-	SystemPrompt ollama.Message
-	Conversation string
+	Scanner       *bufio.Scanner
+	Agent         *agent.Agent
+	SystemPrompt  ollama.Message
+	Conversation  string
+	VerifyCommand []string
 }
 
 func New(a *agent.Agent, systemPrompt string) *CLI {
 	a.Wait = Spinner
 	a.Stats = printStats
+	a.VerifyReport = printVerify
 	return &CLI{
 		Scanner:      bufio.NewScanner(os.Stdin),
 		Agent:        a,
@@ -44,12 +47,37 @@ func printStats(s agent.TurnStats) {
 		perSec = float64(s.OutputTokens) / s.GenTime.Seconds()
 	}
 
-	fmt.Printf("[stats] rounds=%d prompt_tok=%d out_tok=%d prefill=%s gen=%s (%.1f tok/s) load=%s total=%s\n",
-		s.Rounds, s.PromptTokens, s.OutputTokens,
+	fmt.Printf("[stats] rounds=%d verify_attempts=%d verify_passed=%t verify_ms=%s prompt_tok=%d out_tok=%d prefill=%s gen=%s (%.1f tok/s) load=%s total=%s\n",
+		s.Rounds, s.VerifyAttempts, s.VerifyPassed, s.VerifyMS.Round(time.Millisecond),
+		s.PromptTokens, s.OutputTokens,
 		s.PrefillTime.Round(time.Millisecond),
 		s.GenTime.Round(time.Millisecond), perSec,
 		s.LoadTime.Round(time.Millisecond),
 		s.WallTime.Round(time.Millisecond))
+}
+
+func printVerify(res verify.Result, final bool) {
+	cmd := strings.Join(res.Command, " ")
+	dur := res.Duration.Round(time.Millisecond)
+
+	switch {
+	case res.Err != nil:
+		fmt.Printf("[verify] %s -> error (%s)\n%v\n", cmd, dur, res.Err)
+	case res.Passed:
+		fmt.Printf("[verify] %s -> pass (%s)\n", cmd, dur)
+	case final:
+		fmt.Printf("[verify] %s -> fail, retry limit reached (%s)\n", cmd, dur)
+		printVerifyOutput(res.Output)
+	default:
+		fmt.Printf("[verify] %s -> fail, retrying (%s)\n", cmd, dur)
+		printVerifyOutput(res.Output)
+	}
+}
+
+func printVerifyOutput(output string) {
+	if out := strings.TrimRight(output, "\n"); out != "" {
+		fmt.Println(out)
+	}
 }
 
 func (c *CLI) Run() {
