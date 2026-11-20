@@ -82,6 +82,30 @@ func TestRunMatrix_ShapeAndOrder(t *testing.T) {
 	}
 }
 
+func TestRunMatrix_SeedPerRun(t *testing.T) {
+	srv := newFakeOllama(t, textReply("hi"))
+	tasks := []Task{quietTask(t, "a")}
+
+	for _, tc := range []struct {
+		base int
+		want []int
+	}{
+		{base: 0, want: []int{0, 0, 0}},
+		{base: 100, want: []int{100, 101, 102}},
+	} {
+		mc := MatrixConfig{Models: []string{"m1"}, N: 3, Host: srv.URL, Seed: tc.base}
+		var buf bytes.Buffer
+		if err := RunMatrix(tasks, mc, &buf, nil); err != nil {
+			t.Fatal(err)
+		}
+		for i, r := range decodeRows(t, &buf) {
+			if r.Seed != tc.want[i] {
+				t.Errorf("base %d row %d seed = %d, want %d", tc.base, i, r.Seed, tc.want[i])
+			}
+		}
+	}
+}
+
 func TestRunMatrix_ProgressCallback(t *testing.T) {
 	srv := newFakeOllama(t, textReply("hi"))
 	tasks := []Task{quietTask(t, "a")}

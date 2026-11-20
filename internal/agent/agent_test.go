@@ -322,6 +322,19 @@ func captureOllama(t *testing.T, summary string, got *ollama.ChatRequest) string
 	return srv.URL
 }
 
+func TestChat_SendsSeed(t *testing.T) {
+	var req ollama.ChatRequest
+	host := captureOllama(t, "hi", &req)
+	a := &Agent{Model: "test", Host: host, Seed: 42}
+
+	if _, err := a.chat([]ollama.Message{{Role: "user", Content: "hi"}}, false); err != nil {
+		t.Fatal(err)
+	}
+	if req.Options.Seed != 42 {
+		t.Errorf("seed = %d, want 42", req.Options.Seed)
+	}
+}
+
 func TestTrimMiddle_ShortUnchanged(t *testing.T) {
 	s := strings.Repeat("a", maxToolText)
 	if got := trimMiddle(s); got != s {

@@ -23,6 +23,7 @@ type Config struct {
 	RunIndex      int
 	GitCommit     string
 	OllamaVersion string
+	Seed          int
 }
 
 // big ol return
@@ -33,6 +34,7 @@ type Result struct {
 	RunIndex    int     `json:"run_index"`
 	NumCtx      int     `json:"num_ctx"`
 	Temperature float64 `json:"temperature"`
+	Seed        int     `json:"seed"`        //0 means ollama picked a random one
 	PromptHash  string  `json:"prompt_hash"` //sha256 the prompt.default
 	GitCommit   string  `json:"git_commit"`
 	// OllamaVersion is the ollama server version, queried once at the start of
@@ -192,7 +194,7 @@ func Run(task Task, cfg Config) (Result, error) {
 	defer func() { tools.Quiet = oldQuiet }()
 
 	var stats agent.TurnStats
-	a := agent.Agent{Model: cfg.Model, Host: host, Root: workDir, Quiet: true, Stats: func(s agent.TurnStats) { stats = s }}
+	a := agent.Agent{Model: cfg.Model, Host: host, Root: workDir, Quiet: true, Seed: cfg.Seed, Stats: func(s agent.TurnStats) { stats = s }}
 	// every tool task in the bench asks for a code change, so a turn that ends
 	// without one gets the single no-edit nudge. no_tools tasks (greeting) are
 	// excluded, or the nudge would turn a correct plain answer into a failure.
@@ -252,7 +254,7 @@ func Run(task Task, cfg Config) (Result, error) {
 
 	return Result{
 		Task: task.Name, Model: cfg.Model, RunIndex: cfg.RunIndex,
-		NumCtx: agent.NumCTX, Temperature: agent.Temperature,
+		NumCtx: agent.NumCTX, Temperature: agent.Temperature, Seed: cfg.Seed,
 		PromptHash: hex.EncodeToString(sum[:]), GitCommit: cfg.GitCommit, OllamaVersion: cfg.OllamaVersion,
 		Passed: grade.Passed, NoTools: task.NoTools, Tampered: grade.Tampered, Ended: ended, EditApplied: edited,
 		FinalReply: reply, Transcript: history[1:],

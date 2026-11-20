@@ -94,6 +94,7 @@ func runRun(args []string) int {
 	n := fs.Int("n", 1, "repeats per model and task")
 	out := fs.String("out", "", "results file (default: bench/results/<time>-<commit>.jsonl)")
 	host := fs.String("host", "", "ollama URL, e.g. http://<tailscale-name>:11434 (default: OLLAMA_HOST, then localhost)")
+	seed := fs.Int("seed", 0, "base seed; run i uses seed+i so a run can be repeated (default 0: random)")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -178,7 +179,7 @@ func runRun(args []string) int {
 	defer f.Close()
 	fmt.Fprintf(os.Stderr, "writing results to %s\n", path)
 
-	mc := bench.MatrixConfig{Models: modelList, N: *n, Host: *host, GitCommit: commit, OllamaVersion: version}
+	mc := bench.MatrixConfig{Models: modelList, N: *n, Host: *host, GitCommit: commit, OllamaVersion: version, Seed: *seed}
 	progress := func(done, total int, r bench.Result) {
 		fmt.Fprintf(os.Stderr, "[%d/%d] %s %s #%d ended=%s passed=%v\n",
 			done, total, r.Model, r.Task, r.RunIndex, r.Ended, r.Passed)

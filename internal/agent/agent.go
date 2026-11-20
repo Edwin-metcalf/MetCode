@@ -44,6 +44,8 @@ type Agent struct {
 	Verify verify.Func
 	// VerifyReport prints each verification result to the CLI.
 	VerifyReport func(verify.Result, bool)
+	// Seed is sent on every request so a run can be repeated; 0 means random.
+	Seed int
 }
 
 type TurnStats struct {
@@ -135,10 +137,12 @@ func (a *Agent) chat(history []ollama.Message, noToolsFlag bool) (ollama.ChatRes
 		stop := a.Wait()
 		defer stop()
 	}
+	req := BuildChatRequest(history, a.Model)
 	if noToolsFlag {
-		return ollama.Chat(BuildChatRequestNoTools(history, a.Model), a.Host)
+		req = BuildChatRequestNoTools(history, a.Model)
 	}
-	return ollama.Chat(BuildChatRequest(history, a.Model), a.Host)
+	req.Options.Seed = a.Seed
+	return ollama.Chat(req, a.Host)
 }
 
 func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error) {

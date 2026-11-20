@@ -12,6 +12,18 @@ type MatrixConfig struct {
 	Host          string
 	GitCommit     string
 	OllamaVersion string
+	// Seed is the base seed; 0 leaves every run random.
+	Seed int
+}
+
+// runSeed gives each repeat its own seed. One shared seed would make the n
+// repeats near copies of each other at temperature 0.2, so n would stop
+// measuring variance at all.
+func runSeed(base, runIndex int) int {
+	if base == 0 {
+		return 0
+	}
+	return base + runIndex
 }
 
 // RunMatrix runs every model x task x repeat, writing one JSON line per run to w
@@ -27,7 +39,7 @@ func RunMatrix(tasks []Task, mc MatrixConfig, w io.Writer, progress func(done, t
 	for _, model := range mc.Models {
 		for _, task := range tasks {
 			for i := 0; i < mc.N; i++ {
-				res, err := Run(task, Config{Model: model, Host: mc.Host, RunIndex: i, GitCommit: mc.GitCommit, OllamaVersion: mc.OllamaVersion})
+				res, err := Run(task, Config{Model: model, Host: mc.Host, RunIndex: i, GitCommit: mc.GitCommit, OllamaVersion: mc.OllamaVersion, Seed: runSeed(mc.Seed, i)})
 				if err != nil {
 					return fmt.Errorf("%s / %s / run %d: %w", model, task.Name, i, err)
 				}

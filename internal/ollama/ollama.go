@@ -67,6 +67,8 @@ type ChatResponse struct {
 type Options struct {
 	Temperature float64 `json:"temperature"`
 	NumCtx      int     `json:"num_ctx"`
+	// 0 is left out of the request so ollama picks a random seed, same as before
+	Seed int `json:"seed,omitempty"`
 }
 
 type Tool struct {

@@ -245,7 +245,7 @@ func TestResultJSONKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"task", "model", "run_index", "num_ctx", "temperature", "prompt_hash", "git_commit", "ollama_version",
+		"task", "model", "run_index", "num_ctx", "temperature", "seed", "prompt_hash", "git_commit", "ollama_version",
 		"passed", "no_tools", "tampered", "ended", "edit_applied", "final_reply", "transcript",
 		"tool_calls", "tool_errors", "unnecessary_calls", "declined_commands", "grade_output",
 		"rounds", "nudges", "verify_attempts", "verify_passed", "verify_ms",
