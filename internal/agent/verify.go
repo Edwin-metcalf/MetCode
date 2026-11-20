@@ -15,12 +15,16 @@ func verifyCommand(res verify.Result) string {
 	return strings.Join(res.Command, " ")
 }
 
+// verificationFailureMessage does not name the command. In the verify-two-bugs
+// study llama answered a "Command: go test ..." line by calling a tool named
+// "go test" in 18 of 20 runs instead of editing; the CLI still shows the
+// command through VerifyReport. The "Verification failed" prefix is kept so
+// tests and transcript queries still find it.
 func verificationFailureMessage(res verify.Result) string {
-	return "Verification failed after the file change.\n" +
-		"Command: " + verifyCommand(res) + "\n" +
-		"Fix the code, not the test files, and call edit_file again.\n" +
-		"Do not claim success until verification passes.\n" +
-		"Output:\n" + clip(res.Output, maxVerifyFeedback)
+	return "Verification failed: the tests still fail after your edit. MetCode already ran them for you; do not run them yourself.\n" +
+		"Test output:\n" + clip(res.Output, maxVerifyFeedback) + "\n" +
+		"Work out which line of the code produces that wrong result, then call edit_file with the fix. " +
+		"Fix the code, not the test files. Do not claim success until the tests pass."
 }
 
 func verificationLimitMessage(res verify.Result) string {

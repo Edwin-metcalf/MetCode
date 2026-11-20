@@ -254,8 +254,12 @@ func TestTurn_CanceledEditSkipsVerify(t *testing.T) {
 func TestVerificationFailureMessageClipsOutput(t *testing.T) {
 	msg := verificationFailureMessage(failResult(strings.Repeat("z", 9000)))
 
-	if !strings.Contains(msg, "Command: go test ./...") {
-		t.Errorf("message does not name the command: %q", msg[:200])
+	// a named command reads as "run this" to llama, so the model never sees it
+	if strings.Contains(msg, "Command:") || strings.Contains(msg, "go test") {
+		t.Errorf("message names the command: %q", msg[:200])
+	}
+	if !strings.Contains(msg, "edit_file") {
+		t.Errorf("message does not point at edit_file: %q", msg[:200])
 	}
 	if got := strings.Count(msg, "z"); got != maxVerifyFeedback {
 		t.Errorf("output runes = %d, want %d", got, maxVerifyFeedback)
