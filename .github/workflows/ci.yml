@@ -22,3 +22,5 @@ jobs:
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - name: Test
         run: go test ./...
+      - name: Validate benchmark fixtures
+        run: go run ./cmd/metbench validate

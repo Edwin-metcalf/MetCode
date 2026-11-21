@@ -122,3 +122,44 @@ func TestChat_ClassifiesTransportFailures(t *testing.T) {
 		}
 	})
 }
+
+// The configured client is the one that runs, so a test or caller can bound
+// ListModels and Version with its timeout and transport exactly like Chat.
+func TestListModelsAndVersion_UseTheConfiguredClient(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/tags":
+			io.WriteString(w, `{"models":[{"name":"llama3.1"}]}`)
+		case "/api/version":
+			io.WriteString(w, `{"version":"0.5.1"}`)
+		}
+	}))
+	defer srv.Close()
+
+	original := Client
+	t.Cleanup(func() { Client = original })
+	used := 0
+	Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		used++
+		return http.DefaultTransport.RoundTrip(r)
+	})}
+
+	if _, err := ListModels(srv.URL); err != nil {
+		t.Fatalf("ListModels returned error: %v", err)
+	}
+	if _, err := Version(srv.URL); err != nil {
+		t.Fatalf("Version returned error: %v", err)
+	}
+	if used != 2 {
+		t.Errorf("configured client handled %d requests, want 2", used)
+	}
+	if len(paths) != 2 || paths[0] != "/api/tags" || paths[1] != "/api/version" {
+		t.Errorf("paths = %v, want [/api/tags /api/version]", paths)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
