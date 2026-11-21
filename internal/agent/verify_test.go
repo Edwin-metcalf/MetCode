@@ -251,6 +251,51 @@ func TestTurn_CanceledEditSkipsVerify(t *testing.T) {
 	}
 }
 
+func TestTurn_TestFilesReadOnlyWhileVerifying(t *testing.T) {
+	fakeApproval(t, true)
+	host := fakeOllama(t, editReply("sub/add_test.go", "package fixture\n"), textReply("done"))
+	root := t.TempDir()
+	script := &verifyScript{results: []verify.Result{passResult()}}
+	a := &Agent{Model: "test", Host: host, Root: root, Verify: script.run}
+	var history []ollama.Message
+
+	if _, err := a.Turn(&history, "fix add.go"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "sub", "add_test.go")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("refused edit still wrote the test file: %v", err)
+	}
+	var toolMsg string
+	for _, m := range history {
+		if m.Role == "tool" {
+			toolMsg = m.Content
+		}
+	}
+	// the "error" prefix is what the fail-round guard and the nudge key on
+	if !strings.HasPrefix(toolMsg, "error: sub/add_test.go is a test file") {
+		t.Errorf("tool result = %q", toolMsg)
+	}
+	if script.calls != 0 {
+		t.Errorf("verify ran %d times after a refused edit, want 0", script.calls)
+	}
+}
+
+func TestTurn_TestFilesEditableWithoutVerify(t *testing.T) {
+	fakeApproval(t, true)
+	host := fakeOllama(t, editReply("add_test.go", "package fixture\n"), textReply("done"))
+	root := t.TempDir()
+	a := &Agent{Model: "test", Host: host, Root: root}
+	var history []ollama.Message
+
+	if _, err := a.Turn(&history, "write a test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "add_test.go")); err != nil {
+		t.Errorf("without verify a test file should be writable: %v", err)
+	}
+}
+
 func TestVerificationFailureMessageClipsOutput(t *testing.T) {
 	msg := verificationFailureMessage(failResult(strings.Repeat("z", 9000)))
 

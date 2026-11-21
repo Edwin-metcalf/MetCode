@@ -207,7 +207,10 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 			allFailed := true
 
 			for _, call := range resp.Message.ToolCalls {
-				result := tools.Handle(call, a.Root, &a.Plan)
+				result, refused := a.refuseTestEdit(call)
+				if !refused {
+					result = tools.Handle(call, a.Root, &a.Plan)
+				}
 
 				if !strings.HasPrefix(result.Content, "error") {
 					allFailed = false

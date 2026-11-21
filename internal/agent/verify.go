@@ -1,12 +1,34 @@
 package agent
 
 import (
+	"fmt"
+	"path/filepath"
 	"strings"
 
+	"github.com/Edwin-metcalf/MetCode/internal/ollama"
 	"github.com/Edwin-metcalf/MetCode/internal/verify"
 )
 
 const maxVerifyFeedback = 8000
+
+// refuseTestEdit keeps Go test files read-only while verify is on, because the
+// tests are what verify trusts. In the verify-two-bugs-msgUpdate study llama
+// answered a failing test by rewriting scores_test.go in 11 of 20 runs (9 applied).
+// It lives here and not in tools.Handle because only the agent knows whether
+// verify is on. Aliases like write_file are already canonicalized to edit_file.
+func (a *Agent) refuseTestEdit(call ollama.ToolCall) (ollama.Message, bool) {
+	if a.Verify == nil || call.Function.Name != "edit_file" {
+		return ollama.Message{}, false
+	}
+	path, _ := call.Function.Arguments["path"].(string)
+	if !strings.HasSuffix(filepath.Base(path), "_test.go") {
+		return ollama.Message{}, false
+	}
+	if !a.Quiet {
+		fmt.Printf("[tool] edit_file %s refused: test files are read-only while verify is on\n", path)
+	}
+	return ollama.Message{Role: "tool", Content: fmt.Sprintf("error: %s is a test file and is read-only. Do not change the tests; edit the code they test instead.", path)}, true
+}
 
 func verifyCommand(res verify.Result) string {
 	if len(res.Command) == 0 {
