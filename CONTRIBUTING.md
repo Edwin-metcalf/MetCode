@@ -12,7 +12,7 @@ See the README for the full setup and Ollama networking notes.
 ```bash
 git clone https://github.com/Edwin-metcalf/MetCode
 cd MetCode
-go install -o metcode ./cmd/metcode
+go build -o metcode ./cmd/metcode
 ./metcode
 ```
 
@@ -30,20 +30,24 @@ go test ./...
 Tests do **not** need a running Ollama server or network access — `internal/agent`,
 `internal/ollama`, and `internal/ui` fake the model API with `httptest`.
 
-There is no Makefile, linter config, or CI gate keeping you out; the four commands above are
-the whole contract. Keep pull requests focused — one change per PR is easiest to review.
+There is no Makefile or linter config; those four commands plus the
+`metbench validate` CI step are the whole contract. Keep pull requests focused — one change per PR is easiest to review.
 
 ## Project layout
 
 ```
 cmd/metcode/           entry point: wires everything together
+cmd/metbench/          benchmark command line: validate, run, report
+bench/                 task fixtures (bench/tasks) and results (bench/results)
 internal/agent/        the model <-> tool loop for a single turn
 internal/ollama/       Ollama API types and HTTP client (the only code that knows the wire format)
+internal/bench/        benchmark engine: tasks, workspace, grading, runs, reports
 internal/tools/        tool definitions and handlers, path safety
 internal/plan/         plan step types (a bare data type, no logic)
 internal/conversation/ saving and loading chat history
 internal/prompt/       embedded default system prompt and loader
 internal/ui/           banner, spinner, slash commands, input loop
+internal/verify/       runs a command and reports whether it passed
 ```
 
 `internal/ollama` is the only package that knows the Ollama wire format. `internal/tools`
@@ -67,7 +71,7 @@ guard in `internal/agent/agent.go` detects failures purely with
 
 ## MetCode Quirks
 
-These are known and and cause it to work any fix's would need larger discussion.
+These are known and cause it to work any fix's would need larger discussion.
 
 - **`system_prompt.md` is embedded.** It's only written to `~/.metcode/system_prompt.md` when
   that file does **not** already exist. Editing the repo copy changes nothing for anyone who has
@@ -81,7 +85,7 @@ These are known and and cause it to work any fix's would need larger discussion.
   basename only.
 - **Only the first tool call per assistant message runs** (`firstCallOnly`). Extra calls in the
   same message are dropped silently.
-- **Plan state lives on `Agent.Plan`, not in history**, so `/clear` does not reset it.
+- **Plan state lives on `Agent.Plan`, not in history**, so the two are cleared separately; `/clear` resets both.
 - **Saved conversations are JSON in `.txt` files.** Keep the `.txt` extension for back-compat.
 
 ## Style notes
