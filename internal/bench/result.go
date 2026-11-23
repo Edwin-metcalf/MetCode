@@ -60,6 +60,8 @@ type Result struct {
 	//cost from stats and timer
 	Rounds int `json:"rounds"`
 	Nudges int `json:"nudges"` //turns where the no-edit nudge fired
+	// replies whose pasted Go file was turned into an edit_file call
+	Recovered int `json:"recovered"`
 	// Verification is feedback only; Passed still comes from Grade.
 	VerifyAttempts int   `json:"verify_attempts"`
 	VerifyPassed   bool  `json:"verify_passed"`
@@ -260,7 +262,7 @@ func Run(task Task, cfg Config) (Result, error) {
 		FinalReply: reply, Transcript: history[1:],
 		ToolCalls: calls, ToolErrors: errs,
 		UnnecessaryCalls: unnecessary, DeclinedCommands: declined, GradeOutput: grade.Output,
-		Rounds: stats.Rounds, Nudges: stats.Nudges,
+		Rounds: stats.Rounds, Nudges: stats.Nudges, Recovered: stats.Recovered,
 		VerifyAttempts: stats.VerifyAttempts, VerifyPassed: stats.VerifyPassed,
 		VerifyMS:     stats.VerifyMS.Milliseconds(),
 		PromptTokens: stats.PromptTokens, OutputTokens: stats.OutputTokens,

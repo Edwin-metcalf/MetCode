@@ -52,6 +52,7 @@ type TurnStats struct {
 	Calls          int
 	Rounds         int
 	Nudges         int
+	Recovered      int // replies whose pasted file became an edit_file call
 	VerifyAttempts int
 	VerifyPassed   bool
 	VerifyMS       time.Duration
@@ -160,12 +161,20 @@ func (a *Agent) Turn(history *[]ollama.Message, userInput string) (string, error
 }
 
 // recordResponse runs a model message through the cleanup every response needs
-// and appends it to history. All three response sites (first, tool round, nudge)
-// go through here, or a call shape recovered at one site is lost at another.
-func (a *Agent) recordResponse(history *[]ollama.Message, resp ollama.ChatResponse) ollama.ChatResponse {
+// and appends it to history. Every response site (first, tool round, verify
+// retry, nudge) goes through here, or a call shape recovered at one site is lost
+// at another.
+func (a *Agent) recordResponse(history *[]ollama.Message, resp ollama.ChatResponse, stats *TurnStats) ollama.ChatResponse {
 	resp.Message = firstCallOnly(resp.Message)
 	resp.Message = canonicalizeNativeCalls(resp.Message)
 	resp.Message = a.normalizeMessage(resp.Message)
+	if recovered, path, ok := recoverPastedFile(resp.Message, *history, a.Root); ok {
+		resp.Message = recovered
+		stats.Recovered++
+		if !a.Quiet {
+			fmt.Printf("[recover] pasted file -> edit_file %s\n", path)
+		}
+	}
 	*history = append(*history, resp.Message)
 	return resp
 }
@@ -183,7 +192,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 	}
 	logCall(stats, resp, a.Quiet)
 
-	resp = a.recordResponse(history, resp)
+	resp = a.recordResponse(history, resp, stats)
 
 	failRounds := 0
 	edited := false
@@ -244,7 +253,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 			}
 
 			logCall(stats, resp, a.Quiet)
-			resp = a.recordResponse(history, resp)
+			resp = a.recordResponse(history, resp, stats)
 		}
 
 		// Verify only after a real edit, and only when a new edit needs checking.
@@ -283,7 +292,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 				return "", err
 			}
 			logCall(stats, resp, a.Quiet)
-			resp = a.recordResponse(history, resp)
+			resp = a.recordResponse(history, resp, stats)
 			continue
 		}
 
@@ -301,7 +310,7 @@ func (a *Agent) runTurn(history *[]ollama.Message, userInput string, stats *Turn
 			return "", err
 		}
 		logCall(stats, resp, a.Quiet)
-		resp = a.recordResponse(history, resp)
+		resp = a.recordResponse(history, resp, stats)
 	}
 	return resp.Message.Content, nil
 
