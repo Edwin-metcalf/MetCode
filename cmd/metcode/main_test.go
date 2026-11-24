@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"flag"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -17,7 +20,7 @@ func TestWantsVersion(t *testing.T) {
 		{[]string{"-v"}, true},
 		{[]string{"--help"}, false},
 		{[]string{"x", "--version"}, true},
-		{[]string{"--host", "http://192.168.1.50:11434"}, false},
+		{[]string{"-host", "http://192.168.1.50:11434"}, false},
 	}
 	for _, c := range cases {
 		if got := wantsVersion(c.args); got != c.want {
@@ -33,7 +36,7 @@ func TestParseHostFlag(t *testing.T) {
 		want string
 	}{
 		{name: "no args", args: nil, want: ""},
-		{name: "separate value", args: []string{"--host", "http://192.168.1.50:11434"}, want: "http://192.168.1.50:11434"},
+		{name: "separate value", args: []string{"-host", "http://192.168.1.50:11434"}, want: "http://192.168.1.50:11434"},
 		{name: "equals value", args: []string{"--host=http://192.168.1.50:11434"}, want: "http://192.168.1.50:11434"},
 		{name: "single dash", args: []string{"-host", "http://192.168.1.50:11434"}, want: "http://192.168.1.50:11434"},
 	}
@@ -58,8 +61,8 @@ func TestParseFlags(t *testing.T) {
 		verify string
 	}{
 		{name: "no args"},
-		{name: "host only", args: []string{"--host", "http://flag:11434"}, host: "http://flag:11434"},
-		{name: "verify only", args: []string{"--verify", "go test ./..."}, verify: "go test ./..."},
+		{name: "host only", args: []string{"-host", "http://flag:11434"}, host: "http://flag:11434"},
+		{name: "verify only", args: []string{"-verify", "go test ./..."}, verify: "go test ./..."},
 		{name: "both", args: []string{"--host=http://flag:11434", "--verify=go test ./..."}, host: "http://flag:11434", verify: "go test ./..."},
 	}
 	for _, c := range cases {
@@ -70,6 +73,45 @@ func TestParseFlags(t *testing.T) {
 			}
 			if got.Host != c.host || got.Verify != c.verify {
 				t.Errorf("parseFlags(%v) = %+v, want host=%q verify=%q", c.args, got, c.host, c.verify)
+			}
+		})
+	}
+}
+
+func TestParseFlagsHelp(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "long form", args: []string{"--help"}},
+		{name: "short form", args: []string{"-h"}},
+		{name: "single dash long form", args: []string{"-help"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			_, err := parseFlagsWithOutput(tc.args, &output)
+			if !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("parseFlagsWithOutput(%v) error = %v, want flag.ErrHelp", tc.args, err)
+			}
+			for _, want := range []string{
+				"Usage: metcode [options]",
+				"-host",
+				"-verify",
+				"--help",
+				"--version, -v",
+				"OLLAMA_HOST",
+				"~/.metcode/system_prompt.md",
+				"/help",
+				"/save",
+				"/load",
+				"/clear",
+				"/compact",
+				"/change-model",
+			} {
+				if !strings.Contains(output.String(), want) {
+					t.Errorf("help output does not contain %q:\n%s", want, output.String())
+				}
 			}
 		})
 	}

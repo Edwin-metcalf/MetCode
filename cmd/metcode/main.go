@@ -20,6 +20,8 @@ import (
 
 const defaultHost = "http://localhost:11434"
 
+const systemPromptPath = "~/.metcode/system_prompt.md"
+
 // version is set at build time with:
 //
 //	go build -ldflags "-X main.version=v0.1.0" ./cmd/metcode
@@ -55,11 +57,46 @@ type cliFlags struct {
 // parseFlags reads --host and --verify. Go's flag package also accepts
 // --host=value and the single-dash spelling.
 func parseFlags(args []string) (cliFlags, error) {
+	return parseFlagsWithOutput(args, os.Stderr)
+}
+
+func parseFlagsWithOutput(args []string, output io.Writer) (cliFlags, error) {
 	fs := flag.NewFlagSet("metcode", flag.ContinueOnError)
+	fs.SetOutput(output)
 	host := fs.String("host", "", "ollama URL (default: OLLAMA_HOST, then "+defaultHost+")")
 	verifyCmd := fs.String("verify", "", "command to run after an edit, e.g. \"go test ./...\"")
+	help := fs.Bool("help", false, "print usage and exit")
+	shortHelp := fs.Bool("h", false, "print usage and exit")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage: metcode [options]")
+		fmt.Fprintln(fs.Output(), "\nStart the local coding assistant using an Ollama server.")
+		fmt.Fprintln(fs.Output(), "\nOptions:")
+		fs.PrintDefaults()
+		fmt.Fprintln(fs.Output(), "\nOther options:")
+		fmt.Fprintln(fs.Output(), "  --help, -h")
+		fmt.Fprintln(fs.Output(), "      print this help and exit")
+		fmt.Fprintln(fs.Output(), "  --version, -v")
+		fmt.Fprintln(fs.Output(), "      print the MetCode version and exit")
+		fmt.Fprintln(fs.Output(), "\nEnvironment:")
+		fmt.Fprintln(fs.Output(), "  OLLAMA_HOST")
+		fmt.Fprintln(fs.Output(), "      Ollama server URL; used when --host is not supplied (default: "+defaultHost+")")
+		fmt.Fprintln(fs.Output(), "\nConfiguration:")
+		fmt.Fprintln(fs.Output(), "  System prompt: "+systemPromptPath)
+		fmt.Fprintln(fs.Output(), "      created with a default prompt on first run; edit it to customize MetCode")
+		fmt.Fprintln(fs.Output(), "\nInteractive commands:")
+		fmt.Fprintln(fs.Output(), "  /help          show available commands")
+		fmt.Fprintln(fs.Output(), "  /save          save the current conversation")
+		fmt.Fprintln(fs.Output(), "  /load          load a saved conversation")
+		fmt.Fprintln(fs.Output(), "  /clear         clear the current conversation and plan")
+		fmt.Fprintln(fs.Output(), "  /compact       summarize the conversation")
+		fmt.Fprintln(fs.Output(), "  /change-model  switch the Ollama model")
+	}
 	if err := fs.Parse(args); err != nil {
 		return cliFlags{}, err
+	}
+	if *help || *shortHelp {
+		fs.Usage()
+		return cliFlags{}, flag.ErrHelp
 	}
 	return cliFlags{Host: *host, Verify: *verifyCmd}, nil
 }
