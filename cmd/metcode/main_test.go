@@ -152,6 +152,29 @@ func TestResolveHost(t *testing.T) {
 	}
 }
 
+func TestNoEnvWarning(t *testing.T) {
+	noFile := errors.New("open .env: no such file or directory")
+	cases := []struct {
+		name     string
+		envErr   error
+		flagHost string
+		envHost  string
+		want     string
+	}{
+		{"no env file, no host set", noFile, "", "", "no .env file found, using default local host"},
+		{"no env file, --host given", noFile, "http://example:11434", "", ""},
+		{"no env file, OLLAMA_HOST set", noFile, "", "http://example:11434", ""},
+		{"env file loaded", nil, "", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := noEnvWarning(c.envErr, c.flagHost, c.envHost); got != c.want {
+				t.Errorf("noEnvWarning() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestPrintVersion(t *testing.T) {
 	var buf bytes.Buffer
 	printVersion(&buf)
