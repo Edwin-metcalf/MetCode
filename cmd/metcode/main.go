@@ -126,6 +126,16 @@ func resolveHost(flagHost, envHost string) string {
 	return defaultHost
 }
 
+// noEnvWarning returns the message to log when no .env file was loaded and
+// the server host will fall back to the default. It returns "" when --host
+// or OLLAMA_HOST is set, since the default is then not used.
+func noEnvWarning(envLoadErr error, flagHost, envHost string) string {
+	if envLoadErr == nil || flagHost != "" || envHost != "" {
+		return ""
+	}
+	return "no .env file found, using default local host"
+}
+
 func main() {
 	args := os.Args[1:]
 	if wantsVersion(args) {
@@ -141,11 +151,13 @@ func main() {
 		os.Exit(2)
 	}
 
-	if err := godotenv.Load(); err != nil {
-		log.Println("no .env file found, using default local host")
+	envErr := godotenv.Load()
+	envHost := os.Getenv("OLLAMA_HOST")
+	if msg := noEnvWarning(envErr, flags.Host, envHost); msg != "" {
+		log.Println(msg)
 	}
 
-	host := resolveHost(flags.Host, os.Getenv("OLLAMA_HOST"))
+	host := resolveHost(flags.Host, envHost)
 
 	workingDir, err := os.Getwd()
 	if err != nil {
