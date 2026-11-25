@@ -92,3 +92,24 @@ func TestList_MissingDirReturnsEmptyNoError(t *testing.T) {
 		t.Errorf("List on a missing dir = %v, want empty", names)
 	}
 }
+
+func TestList_SkipsNonConversationFiles(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"chat.txt", ".DS_Store", "notes.md", "backup.txt.bak"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("[]"), 0644); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(dir, "sub.txt"), 0755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+
+	got, err := List(dir)
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	want := []string{"chat.txt"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("List = %v, want %v", got, want)
+	}
+}

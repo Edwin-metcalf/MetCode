@@ -40,7 +40,9 @@ func List(dir string) ([]string, error) {
 	var stringSlice []string
 
 	for _, val := range dirSlice {
-		if val.IsDir() {
+		// only .txt files are conversations (Save always writes .txt);
+		// skip anything else, e.g. macOS .DS_Store
+		if val.IsDir() || !strings.HasSuffix(val.Name(), ".txt") {
 			continue
 		}
 		stringSlice = append(stringSlice, val.Name())
