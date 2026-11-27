@@ -18,20 +18,31 @@ go build -o metcode ./cmd/metcode
 
 ## Before you send a change
 
-Run all four of these and make sure they're clean:
+Run this and make sure it's clean:
 
 ```bash
-gofmt -l .    
+make check
+```
+
+`make check` runs the same steps as CI (`.github/workflows/ci.yml`), in the same order:
+`go build ./...`, `go vet ./...`, a `gofmt -l .` check, `go test ./...`, and
+`go run ./cmd/metbench validate`. If a file isn't formatted, `make fmt` fixes it.
+Run `make help` to see every target (`make build`, `make test`, etc. run one step on its own).
+
+No `make`? Run the steps directly:
+
+```bash
 go build ./...
 go vet ./...
+gofmt -l .    # should print nothing
 go test ./...
+go run ./cmd/metbench validate
 ```
 
 Tests do **not** need a running Ollama server or network access — `internal/agent`,
 `internal/ollama`, and `internal/ui` fake the model API with `httptest`.
 
-There is no Makefile or linter config; those four commands plus the
-`metbench validate` CI step are the whole contract. Keep pull requests focused — one change per PR is easiest to review.
+There is no linter config; `make check` is the whole contract. Keep pull requests focused — one change per PR is easiest to review.
 
 ## Project layout
 

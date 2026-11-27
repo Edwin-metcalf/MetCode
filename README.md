@@ -244,10 +244,10 @@ internal/ui/          banner, spinner, slash commands, input loop
 ## Development
 
 ```bash
-go build ./...
-go vet ./...
-go test ./...
+make check    # build, vet, gofmt check, tests, and benchmark fixture validation: the same steps CI runs
 ```
+
+`make build`, `make test`, `make vet`, and `make fmt` run single steps; `make help` lists them all. Without `make`, run `go build ./...`, `go vet ./...`, `gofmt -l .`, and `go test ./...` directly.
 
 Tests don't need a running Ollama server; the model API is faked with `httptest`. 
 The `internal/bench` tests run `go test` on temporary copies of the fixtures, so they need the Go toolchain on your `PATH` and take a few seconds. 
